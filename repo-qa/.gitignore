@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Environments
+.env
+.venv
+venv/
+
+# Data (don't commit trajectories and results)
+data/trajectories/
+data/results/
+data/benchmarks/*/raw/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log

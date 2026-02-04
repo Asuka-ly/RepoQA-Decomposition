@@ -1,0 +1,8 @@
+name: "no_graph"
+description: "Without graph construction and injection"
+enable_graph: false
+enable_graph_injection: false
+enable_command_filter: true
+enable_pattern_detection: false
+injection_min_length: 6
+max_steps: 50

@@ -1,0 +1,3 @@
+When LocalEnvironment.execute encounters a timeout, how does it become an ExecutionTimeoutError in DefaultAgent?
+
+⚠️ All source code is in /root/mini-swe-agent/src, start there.

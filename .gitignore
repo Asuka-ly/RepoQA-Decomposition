@@ -1,0 +1,51 @@
+# 虚拟环境（覆盖venv/conda/env等常见虚拟环境）
+venv/
+.conda/
+env/
+swe-agent/  # 补充你实际用的swe-agent虚拟环境
+
+# Python 缓存文件
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# 深度学习/AutoDL 缓存
+.cache/
+.ipynb_checkpoints/
+.gradio/
+.autodl/    # 补充AutoDL专属缓存目录
+.tmp/       # 临时文件目录
+
+# 大模型权重/大数据文件（核心忽略，防止仓库爆炸）
+*.pth
+*.bin
+*.model
+*.ckpt
+*.pt
+*.h5
+*.npz
+data/repositories/  # 项目拉取的仓库源码
+data/trajectories/  # 轨迹数据
+results/            # 运行结果
+models/             # 本地存放的模型权重
+
+# 环境变量/配置文件（含敏感信息+框架配置）
+.env
+.env.*
+*.conf
+*.ini
+config/local/
+
+# 日志/临时文件
+*.log
+*.tmp
+*.swp
+*.swo
+*~
+
+# 其他工具缓存
+.vscode/
+.idea/
+.DS_Store

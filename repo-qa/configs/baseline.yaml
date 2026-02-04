@@ -1,0 +1,8 @@
+name: "baseline"
+description: "Full system with all features enabled"
+enable_graph: true
+enable_graph_injection: true
+enable_command_filter: true
+enable_pattern_detection: false
+injection_min_length: 6
+max_steps: 50
