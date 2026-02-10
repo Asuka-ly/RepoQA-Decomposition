@@ -1,78 +1,99 @@
 #!/bin/bash
-# 简单环境配置脚本
+# RepoQA 环境配置脚本
 
-set -e
+set -e  # 遇到错误立即退出
 
-echo "🚀 Setting up repo-qa environment..."
+echo "=========================================="
+echo "🔧 RepoQA Environment Setup"
+echo "=========================================="
+echo
 
-# 1. 激活 conda 环境
-echo "📦 Activating conda environment..."
-source ~/miniconda3/etc/profile.d/conda.sh
-conda activate swe-agent
+# 1. 检测项目根目录
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+echo "📂 Project Root: $PROJECT_ROOT"
+echo
 
-# 2. 进入项目目录
-cd /root/repo-qa
+# 2. 检查 Conda 环境
+if [ -z "$CONDA_DEFAULT_ENV" ]; then
+    echo "⚠️  Warning: Not in a Conda environment"
+    echo "   Please run: conda activate swe-agent"
+    echo
+    read -p "Continue anyway? (y/n) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        exit 1
+    fi
+else
+    echo "✓ Conda environment: $CONDA_DEFAULT_ENV"
+fi
+echo
 
-# 3. 创建 .env 模板（如果不存在）
+# 3. 安装 Python 依赖
+echo "📦 Installing Python dependencies..."
+cd "$PROJECT_ROOT/repo-qa"
+
+if [ -f "requirements.txt" ]; then
+    pip install -r requirements.txt --break-system-packages
+    echo "✓ Dependencies installed"
+else
+    echo "⚠️  requirements.txt not found, installing minimal dependencies..."
+    pip install mini-swe-agent==1.17.5 \
+                tree-sitter==0.25.2 \
+                tree-sitter-python==0.25.0 \
+                networkx==3.4.2 \
+                litellm==1.81.5 \
+                python-dotenv \
+                pyyaml \
+                --break-system-packages
+fi
+echo
+
+# 4. 创建必要的目录
+echo "📁 Creating directories..."
+mkdir -p data/questions
+mkdir -p data/trajectories
+mkdir -p data/results
+mkdir -p configs
+mkdir -p tests
+echo "✓ Directories created"
+echo
+
+# 5. 检查 .env 文件
+echo "🔑 Checking .env configuration..."
+cd "$PROJECT_ROOT"
+
 if [ ! -f ".env" ]; then
-    echo "📝 Creating .env file..."
-    cat > .env << 'EOF'
-# ==============================================
-# API Configuration
-# ==============================================
-# Fill in your values below, then run: bash setup.sh
-
-OPENAI_API_KEY="sk-jMwotJusiO6yFwPRcclkoy5t3MefqzgssdUhpdnPUs7ABfVH"
-OPENAI_API_BASE="https://api.qingyuntop.top/v1"
-DEFAULT_MODEL=gpt-5.1-mini
-
-# ==============================================
-# Examples for different providers:
-# ==============================================
-
-# OpenAI:
-# OPENAI_API_KEY=sk-xxxxx
-# OPENAI_API_BASE=https://api.openai.com/v1
-# DEFAULT_MODEL=gpt-4o-mini
-
-# DeepSeek:
-# OPENAI_API_KEY=sk-xxxxx
-# OPENAI_API_BASE=https://api.deepseek.com/v1
-# DEFAULT_MODEL=deepseek-chat
-
-# Custom:
-# OPENAI_API_KEY=your-key
-# OPENAI_API_BASE=https://your-url.com/v1
-# DEFAULT_MODEL=your-model
-EOF
-    echo ""
-    echo "⚠️  .env file created!"
-    echo "   Please edit .env and add your API credentials, then run 'bash setup.sh' again"
-    exit 0
+    if [ -f ".env.example" ]; then
+        echo "⚠️  .env not found, copying from .env.example..."
+        cp .env.example .env
+        echo
+        echo "⚠️  IMPORTANT: Please edit .env and set your OPENAI_API_KEY"
+        echo "   File location: /root/RepoQA-Project/.env"
+        echo
+    else
+        echo "❌ Neither .env nor .env.example found!"
+        echo "   Please create .env manually with:"
+        echo "   OPENAI_API_KEY=your-key-here"
+        echo
+        exit 1
+    fi
+else
+    echo "✓ .env file exists"
 fi
+echo
 
-# 4. 检查配置
-source .env
-if [ "$OPENAI_API_KEY" = "your-api-key-here" ]; then
-    echo "❌ Error: Please edit .env and fill in your OPENAI_API_KEY"
-    exit 1
-fi
+# 6. 验证配置
+echo "🔍 Validating configuration..."
+cd "$PROJECT_ROOT/repo-qa"
+python scripts/check_config.py
 
-echo "✓ API configured: ${OPENAI_API_BASE}"
-
-# 5. 安装依赖
-echo "📦 Installing dependencies..."
-pip install -r requirements.txt --break-system-packages -q
-
-# 6. 验证
-echo "🔍 Verifying environment..."
-python -c "import minisweagent; print('✓ mini-swe-agent')"
-python -c "from tree_sitter import Language; print('✓ tree-sitter')"
-python -c "import networkx; print('✓ networkx')"
-python -c "import yaml; print('✓ pyyaml')"
-
-echo ""
+echo
+echo "=========================================="
 echo "✅ Setup complete!"
-echo ""
-echo "Quick start:"
-echo "  python scripts/run_single.py"
+echo "=========================================="
+echo
+echo "Next steps:"
+echo "  1. Edit $PROJECT_ROOT/.env to set your API key"
+echo "  2. Run: python scripts/check_config.py"
+echo "  3. Run: python scripts/run_single.py"
+echo

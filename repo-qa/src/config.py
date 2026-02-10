@@ -8,11 +8,14 @@ from typing import Optional
 class ExperimentConfig:
     """实验配置类（简化版）"""
     
-    # === 核心开关 ===
     enable_graph: bool = True
     enable_graph_injection: bool = True
     enable_command_filter: bool = True
     enable_pattern_detection: bool = False
+    
+    # === 模型配置 (修复：添加以下两行) ===
+    model_name: str = "gpt-5-mini"
+    model_api_base: Optional[str] = None
     
     # === 参数 ===
     injection_min_length: int = 6

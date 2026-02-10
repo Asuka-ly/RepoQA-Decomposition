@@ -1,0 +1,27 @@
+{
+  "config": {
+    "enable_graph": true,
+    "enable_graph_injection": true,
+    "enable_command_filter": true,
+    "enable_pattern_detection": false,
+    "model_name": "gpt-5-mini",
+    "model_api_base": null,
+    "injection_min_length": 6,
+    "max_steps": 50,
+    "name": "baseline",
+    "description": "\u5b8c\u6574\u529f\u80fd\uff1a\u6218\u7565\u5206\u89e3 + \u56fe\u6ce8\u5165 + \u547d\u4ee4\u8fc7\u6ee4"
+  },
+  "statistics": {
+    "total_steps": 9,
+    "viewed_files": 6,
+    "task_completed": true,
+    "answer_length": 4095,
+    "total_blocked": 0,
+    "unique_patterns": 0,
+    "most_common": null,
+    "total_injections": 1
+  },
+  "duration_seconds": 86.873201,
+  "final_answer": "- CLI entry:\n  - Running python -m minisweagent calls minisweagent.__main__.py which invokes the Typer app defined in minisweagent.run.mini (lines 4-7 of __main__.py).\n  - The Typer command main(...) in minisweagent/run/mini.py accepts a config path via the -c/--config option (param config_spec, default DEFAULT_CONFIG). (See run/mini.py: lines ~48-56).\n\n- Resolving the config path:\n  - main() calls config_path = get_config_path(config_spec) (run/mini.py line ~61).\n  - get_config_path in minisweagent/config/__init__.py converts config_spec to a Path, ensures a .yaml suffix, then searches these candidates (in order): Path(config_spec), MSWEA_CONFIG_DIR/config_spec, builtin_config_dir/config_spec, builtin_config_dir/extra/config_spec. It returns the first existing file or raises FileNotFoundError. (config/__init__.py lines 9-24).\n\n- Parsing YAML:\n  - main() reads and parses the file using yaml.safe_load(config_path.read_text()), producing a plain Python dict named config (run/mini.py line ~63).\n\n- Building the model and model config:\n  - main() calls model = get_model(model_name, config.get(\"model\", {})) (run/mini.py line ~86).\n  - get_model (minisweagent.models.__init__) determines the concrete model class (via get_model_class) and then creates the model with model_class(**config). Note: get_model first copies and augments the config dict (sets \"model_name\" and possibly other defaults) then returns model_class(**config) (models/__init__.py around lines 45-65).\n  - For the deterministic test model, the mapping points \"deterministic\" -> \"minisweagent.models.test_models.DeterministicModel\" (models/__init__.py mapping around line 81-90).\n  - DeterministicModel.__init__(self, **kwargs) in minisweagent/models/test_models.py constructs self.config = DeterministicModelConfig(**kwargs) (test_models.py line ~21). DeterministicModelConfig is a dataclass (fields: outputs: list[str], model_name: str = \"deterministic\", cost_per_call: float = 1.0) (test_models.py lines ~9-14).\n  - Therefore, the YAML mapping under \"model\" (or the config dict passed into get_model) is unpacked as keyword args into DeterministicModelConfig, producing the final model config dataclass instance accessible as model.config.\n\n- Building the environment:\n  - main() does env = LocalEnvironment(**config.get(\"environment\", {})) (run/mini.py line ~87), so the YAML \"environment\" mapping is passed into the LocalEnvironment constructor.\n\n- Building the agent config and agent object:\n  - main() chooses agent_class (InteractiveAgent or TextualAgent) and then constructs agent = agent_class(model, env, **config.get(\"agent\", {})) (run/mini.py line ~94).\n  - InteractiveAgent/TextualAgent inherit DefaultAgent. DefaultAgent.__init__ signature is def __init__(self, model: Model, env: Environment, *, config_class: type = AgentConfig, **kwargs): self.config = config_class(**kwargs) (agents/default.py lines ~65-67).\n  - AgentConfig is a dataclass (default templates, regex, step_limit, cost_limit) defined at top of agents/default.py (lines ~13-39). So the YAML \"agent\" mapping is unpacked into AgentConfig fields, producing the final agent configuration object agent.config.\n\n- Summary flow (concise):\n  1. CLI -c/--config passes config_spec to run/mini.main.\n  2. get_config_path resolves the actual YAML file path.\n  3. yaml.safe_load reads and parses the YAML into a Python dict `config`.\n  4. config.get(\"model\", {}) is passed into get_model which instantiates a Model class; for DeterministicModel the model's constructor wraps the dict into DeterministicModelConfig dataclass: self.config = DeterministicModelConfig(**kwargs).\n  5. config.get(\"agent\", {}) is passed as kwargs to the AgentConfig dataclass via DefaultAgent.__init__: self.config = config_class(**kwargs).\n  6. Thus, YAML -> dict -> dataclass instances (DeterministicModelConfig for model, AgentConfig for agent) -> used throughout the agent's runtime (rendering templates, limits, etc).\n\nThis is the complete trace from the command-line config argument to the final Config objects used by the model and the agent.\n\n```bash\ntrue\n```",
+  "completed": true
+}

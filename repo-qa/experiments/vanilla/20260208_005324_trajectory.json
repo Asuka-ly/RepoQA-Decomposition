@@ -1,0 +1,27 @@
+{
+  "config": {
+    "enable_graph": false,
+    "enable_graph_injection": false,
+    "enable_command_filter": true,
+    "enable_pattern_detection": false,
+    "model_name": "gpt-5-mini",
+    "model_api_base": null,
+    "injection_min_length": 6,
+    "max_steps": 50,
+    "name": "vanilla",
+    "description": "\u5bf9\u7167\u7ec4\uff1a\u65e0\u5206\u89e3\u7684\u7eaf mini-swe-agent"
+  },
+  "statistics": {
+    "total_steps": 12,
+    "viewed_files": 8,
+    "task_completed": false,
+    "answer_length": 0,
+    "total_blocked": 0,
+    "unique_patterns": 0,
+    "most_common": null
+  },
+  "duration_seconds": 64.794814,
+  "final_answer": "N/A",
+  "completed": false,
+  "prompt_length": 580
+}

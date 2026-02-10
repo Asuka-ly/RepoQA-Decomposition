@@ -1,8 +1,17 @@
-name: "no_graph"
-description: "Without graph construction and injection"
-enable_graph: false
-enable_graph_injection: false
+# === 模型配置 ===
+model_name: "gpt-5-mini"
+model_api_base: null
+
+# === 核心开关 ===
+enable_graph: true  # 构建图但不注入
+enable_graph_injection: false  # 关键：不注入
 enable_command_filter: true
 enable_pattern_detection: false
+
+# === 参数 ===
 injection_min_length: 6
 max_steps: 50
+
+# === 元信息 ===
+name: "no_graph"
+description: "消融：有分解但无图注入"

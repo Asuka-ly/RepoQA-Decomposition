@@ -1,0 +1,27 @@
+{
+  "config": {
+    "enable_graph": true,
+    "enable_graph_injection": true,
+    "enable_command_filter": true,
+    "enable_pattern_detection": false,
+    "model_name": "gpt-5-mini",
+    "model_api_base": null,
+    "injection_min_length": 6,
+    "max_steps": 50,
+    "name": "baseline",
+    "description": "\u5b8c\u6574\u529f\u80fd\uff1a\u6218\u7565\u5206\u89e3 + \u56fe\u6ce8\u5165 + \u547d\u4ee4\u8fc7\u6ee4"
+  },
+  "statistics": {
+    "total_steps": 0,
+    "viewed_files": 0,
+    "task_completed": false,
+    "answer_length": 0,
+    "total_blocked": 0,
+    "unique_patterns": 0,
+    "most_common": null,
+    "total_injections": 0
+  },
+  "duration_seconds": 9.038726,
+  "final_answer": "N/A",
+  "completed": false
+}

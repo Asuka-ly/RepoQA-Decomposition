@@ -1,58 +1,88 @@
-"""命令过滤器 - 修复正则版"""
+"""命令过滤器 - 智能版：区分重定向操作符与文本内容"""
 import re
-from typing import Tuple, List, Dict
+from typing import Tuple, Dict
 
 class CommandFilter:
-    """命令安全过滤器"""
+    """智能命令过滤器：只拦截真正的写操作，不误伤 echo 输出"""
     
-    # 核心禁止模式 - 极其简化的正则，防止转义问题
+    # 精准拦截模式
     FORBIDDEN_PATTERNS = [
-        ('sleep', "Sleep is for testing timeouts, not analyzing code"),
-        ('timeout', "Timeout command is not needed for code analysis"),
-        ('python -c', "Direct execution via python -c is forbidden"),
-        ('<<EOF', "Heredoc creates files, analysis should only read"),
-        ('def test_', "Test function definitions are not allowed"),
+        # 文件写入操作（Shell 重定向，必须在引号外）
+        (r'\s+>\s+\S+', "File writing via redirection is forbidden"),  # 修改：只匹配 '> filename' 格式
+        (r'\s+>>\s+\S+', "File appending via redirection is forbidden"),
+        
+        # 危险的文件创建命令
+        (r'\bcat\s+<<', "Heredoc file creation is forbidden"),  # cat <<EOF
+        (r'\btouch\b', "Creating files is forbidden"),
+        (r'\brm\s+', "Deleting files is forbidden"),
+        (r'\bmv\s+', "Moving files is forbidden"),
+        
+        # 执行类命令
+        (r'\bsleep\s+\d', "Sleep is for testing, not analyzing"),
+        (r'\bpython\s+-c\b', "Direct code execution is forbidden"),
+        (r'\bpython\s+\w+\.py', "Script execution is forbidden"),
+        (r'\bpip\s+install', "Installing packages is forbidden"),
+        
+        # 危险的系统操作
+        (r'\bchmod\b', "Changing permissions is forbidden"),
+        (r'\bwget\b', "Downloading is forbidden"),
+        (r'\bcurl\s+-O', "Downloading is forbidden"),
+    ]
+    
+    # 明确允许的命令（白名单，即使包含 > 也放行）
+    ALLOWED_COMMANDS = [
+        r'^echo\b',      # echo 输出到标准输出（即使内容包含 >）
+        r'^printf\b',    # printf 同理
+        r'^cat\s+\S+$',  # cat 单个文件（不带重定向）
     ]
     
     def __init__(self, enabled: bool = True):
         self.enabled = enabled
-        self.blocked_history: List[Dict] = []
+        self.blocked_history = []
     
     def should_block(self, command: str) -> Tuple[bool, str]:
-        """
-        兼容mini-swe-agent v2版本：
-        v2中command是dict → {'command': '实际命令', 'tool_call_id': 'xxx'}
-        v1中command是字符串 → '实际命令'
-        先提取真正的命令字符串，再进行过滤
-        """
-        # 核心修复：从dict中提取实际的command字符串，兼容字符串格式
-        if isinstance(command, dict):
-            # 是v2的dict格式，提取command字段
-            cmd_str = command.get("command", "")  # 无command字段则置空
-        else:
-            # 是v1的字符串格式，直接使用
-            cmd_str = str(command)
+        """智能检查：区分真实重定向和文本内容"""
+        if not self.enabled:
+            return False, ""
         
-        cmd_clean = command.strip().lower()
+        cmd_clean = command.strip()
+        
+        # 优先检查白名单（快速放行）
+        for allowed in self.ALLOWED_COMMANDS:
+            if re.match(allowed, cmd_clean, re.IGNORECASE):
+                return False, ""
+        
+        # 检查黑名单模式
         for pattern, reason in self.FORBIDDEN_PATTERNS:
-            # 使用最简单的字符串包含检查，防止正则失效
-            if pattern in cmd_clean:
+            if re.search(pattern, cmd_clean, re.IGNORECASE):
+                # 额外验证：确保 > 不在引号内
+                if pattern in [r'\s+>\s+\S+', r'\s+>>\s+\S+']:
+                    if self._is_redirect_in_quotes(cmd_clean):
+                        continue  # 在引号内，放行
+                
                 self.blocked_history.append({
                     'command': command,
-                    'reason': reason,
-                    'pattern': pattern
+                    'pattern': pattern,
+                    'reason': reason
                 })
                 return True, reason
         
         return False, ""
     
+    def _is_redirect_in_quotes(self, command: str) -> bool:
+        """检查重定向符是否在引号内"""
+        # 移除所有引号内的内容
+        without_quotes = re.sub(r'''(['"]).*?\1''', '', command)
+        # 如果移除引号后没有 > 了，说明原命令的 > 都在引号内
+        return '>' not in without_quotes and '>>' not in without_quotes
+    
     def get_suggestion(self, command: str, reason: str) -> str:
-        return (
-            f"❌ Blocked: {reason}\n"
-            "💡 SUGGESTION: This is a CODE ANALYSIS task. \n"
-            "Please use 'cat', 'grep', or 'ls' to understand the logic. \n"
-            "Do NOT try to run scripts or wait for timeouts."
-        )
+        """提供替代建议"""
+        if 'redirection' in reason:
+            return "Hint: Use 'echo' to display text without writing files."
+        if 'execution' in reason:
+            return "Hint: Read code with 'cat' or 'grep' instead of executing."
+        return "Use read-only tools: cd, ls, cat, grep, find, head, tail."
     
     def get_stats(self) -> Dict:
         return {

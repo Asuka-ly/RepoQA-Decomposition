@@ -1,0 +1,23 @@
+[
+  {
+    "total_steps": 4,
+    "viewed_files": 1,
+    "total_blocked": 1,
+    "unique_patterns": 1,
+    "most_common": "timeout",
+    "total_injections": 1,
+    "config_name": "baseline",
+    "duration": 67.247627,
+    "status": "Submitted"
+  },
+  {
+    "total_steps": 5,
+    "viewed_files": 0,
+    "total_blocked": 0,
+    "unique_patterns": 0,
+    "most_common": null,
+    "config_name": "vanilla",
+    "duration": 52.541195,
+    "status": "Submitted"
+  }
+]

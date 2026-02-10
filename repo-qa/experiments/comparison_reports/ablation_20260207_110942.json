@@ -1,0 +1,23 @@
+[
+  {
+    "total_steps": 6,
+    "viewed_files": 2,
+    "total_blocked": 1,
+    "unique_patterns": 1,
+    "most_common": "\\s+>\\s+\\S+",
+    "total_injections": 4,
+    "config_name": "baseline",
+    "duration": 122.247496,
+    "status": "Submitted"
+  },
+  {
+    "total_steps": 10,
+    "viewed_files": 2,
+    "total_blocked": 1,
+    "unique_patterns": 1,
+    "most_common": "\\bcat\\s+<<",
+    "config_name": "vanilla",
+    "duration": 161.439564,
+    "status": "Submitted"
+  }
+]

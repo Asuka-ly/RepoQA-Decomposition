@@ -1,0 +1,17 @@
+# === 模型配置 ===
+model_name: "gpt-5-mini"
+model_api_base: null
+
+# === 核心开关（全部关闭）===
+enable_graph: false
+enable_graph_injection: false
+enable_command_filter: true  # 只保留命令过滤
+enable_pattern_detection: false
+
+# === 参数 ===
+injection_min_length: 6
+max_steps: 50
+
+# === 元信息 ===
+name: "vanilla"
+description: "对照组：无分解的纯 mini-swe-agent"

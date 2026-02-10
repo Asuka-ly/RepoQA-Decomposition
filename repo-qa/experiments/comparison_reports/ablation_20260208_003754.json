@@ -1,0 +1,22 @@
+[
+  {
+    "total_steps": 10,
+    "viewed_files": 3,
+    "task_completed": false,
+    "answer_length": 0,
+    "total_blocked": 0,
+    "unique_patterns": 0,
+    "most_common": null,
+    "total_injections": 2,
+    "config_name": "baseline",
+    "duration": 87.517204,
+    "status": "Completed"
+  },
+  {
+    "config_name": "vanilla",
+    "total_steps": 0,
+    "viewed_files": 0,
+    "duration": 2.1e-05,
+    "status": "Failed: 'NoneType' object has no attribute 'get'"
+  }
+]

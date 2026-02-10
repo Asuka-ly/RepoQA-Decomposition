@@ -1,8 +1,17 @@
-name: "no_filter"
-description: "Without command filtering"
+# === 模型配置 ===
+model_name: "gpt-5-mini"
+model_api_base: null
+
+# === 核心开关 ===
 enable_graph: true
 enable_graph_injection: true
-enable_command_filter: false
+enable_command_filter: false  # 关键：关闭过滤
 enable_pattern_detection: false
+
+# === 参数 ===
 injection_min_length: 6
 max_steps: 50
+
+# === 元信息 ===
+name: "no_filter"
+description: "消融：允许 Agent 执行任意命令"

@@ -1,0 +1,27 @@
+[
+  {
+    "total_steps": 12,
+    "viewed_files": 5,
+    "task_completed": false,
+    "answer_length": 0,
+    "total_blocked": 0,
+    "unique_patterns": 0,
+    "most_common": null,
+    "total_injections": 3,
+    "config_name": "baseline",
+    "duration": 65.026232,
+    "status": "Completed"
+  },
+  {
+    "total_steps": 12,
+    "viewed_files": 8,
+    "task_completed": false,
+    "answer_length": 0,
+    "total_blocked": 0,
+    "unique_patterns": 0,
+    "most_common": null,
+    "config_name": "vanilla",
+    "duration": 64.795929,
+    "status": "Completed"
+  }
+]

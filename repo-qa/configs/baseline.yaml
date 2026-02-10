@@ -1,8 +1,17 @@
-name: "baseline"
-description: "Full system with all features enabled"
+# === 模型配置 ===
+model_name: "gpt-5-mini"
+model_api_base: null
+
+# === 核心开关 ===
 enable_graph: true
 enable_graph_injection: true
 enable_command_filter: true
 enable_pattern_detection: false
+
+# === 参数 ===
 injection_min_length: 6
 max_steps: 50
+
+# === 元信息 ===
+name: "baseline"
+description: "完整功能：战略分解 + 图注入 + 命令过滤"
