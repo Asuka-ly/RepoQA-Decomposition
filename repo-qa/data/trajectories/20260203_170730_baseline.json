@@ -1,0 +1,57 @@
+{
+  "config": {
+    "enable_graph": true,
+    "enable_graph_injection": true,
+    "enable_command_filter": true,
+    "enable_pattern_detection": false,
+    "injection_min_length": 6,
+    "max_steps": 50,
+    "name": "baseline",
+    "description": "Full system with all features enabled"
+  },
+  "repo_path": "/root/mini-swe-agent/src/minisweagent",
+  "decomposition": {
+    "aspects": [
+      {
+        "description": "Trace how the agent parses command-line arguments to extract paths or configuration keys relevant to loading YAML files.",
+        "entry_point": "unknown::parse_arguments",
+        "symbols": [],
+        "priority": 1
+      },
+      {
+        "description": "Investigate how YAML files are read and parsed into Python objects.",
+        "entry_point": "run/extra/utils/batch_progress.py::_save_overview_data_yaml",
+        "symbols": [
+          "_save_overview_data_yaml"
+        ],
+        "priority": 2
+      },
+      {
+        "description": "Determine how the parsed YAML data is transformed into the final 'Config' object used by the system.",
+        "entry_point": "unknown::Config.__init__",
+        "symbols": [],
+        "priority": 3
+      },
+      {
+        "description": "Link how the extracted configuration integrates with the DefaultAgent initialization process.",
+        "entry_point": "agents/default.py::DefaultAgent.__init__",
+        "symbols": [
+          "DefaultAgent"
+        ],
+        "priority": 4
+      }
+    ],
+    "synthesis": "Combine the flow ranging from command-line argument parsing, YAML file reading, and loading, transforming parsed data into a Config object, and integrating it into the DefaultAgent.",
+    "estimated_hops": 2
+  },
+  "history": [],
+  "statistics": {
+    "total_steps": 0,
+    "viewed_files": 0,
+    "total_blocked": 0,
+    "unique_patterns": 0,
+    "most_common": null,
+    "total_injections": 0
+  },
+  "duration_seconds": 15.227614
+}

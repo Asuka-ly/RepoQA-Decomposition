@@ -1,0 +1,55 @@
+{
+  "config": {
+    "enable_graph": true,
+    "enable_graph_injection": true,
+    "enable_command_filter": true,
+    "enable_pattern_detection": false,
+    "injection_min_length": 6,
+    "max_steps": 50,
+    "name": "baseline",
+    "description": "Full system with all features enabled"
+  },
+  "repo_path": "/root/mini-swe-agent/src/minisweagent",
+  "decomposition": {
+    "aspects": [
+      {
+        "description": "Investigate the question: How does mini-swe-agent load configuration from YA...",
+        "entry_point": "unknown",
+        "symbols": [
+          "does",
+          "argument",
+          "Config",
+          "flow",
+          "configuration",
+          "root",
+          "object",
+          "YAML",
+          "agent",
+          "from",
+          "files",
+          "final",
+          "mini",
+          "command",
+          "How",
+          "line",
+          "Trace",
+          "Start",
+          "load"
+        ],
+        "priority": 1
+      }
+    ],
+    "synthesis": "Answer based on code exploration",
+    "estimated_hops": 1
+  },
+  "history": [],
+  "statistics": {
+    "total_steps": 0,
+    "viewed_files": 0,
+    "total_blocked": 0,
+    "unique_patterns": 0,
+    "most_common": null,
+    "total_injections": 0
+  },
+  "duration_seconds": 26.994037
+}

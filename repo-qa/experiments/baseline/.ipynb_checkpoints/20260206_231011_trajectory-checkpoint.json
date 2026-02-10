@@ -1,0 +1,23 @@
+{
+  "config": {
+    "enable_graph": true,
+    "enable_graph_injection": true,
+    "enable_command_filter": true,
+    "enable_pattern_detection": false,
+    "model_name": "gpt-5-mini",
+    "model_api_base": null,
+    "injection_min_length": 6,
+    "max_steps": 50,
+    "name": "baseline",
+    "description": "Full system with all features enabled"
+  },
+  "statistics": {
+    "total_steps": 4,
+    "viewed_files": 1,
+    "total_blocked": 0,
+    "unique_patterns": 0,
+    "most_common": null,
+    "total_injections": 1
+  },
+  "duration_seconds": 432.207252
+}

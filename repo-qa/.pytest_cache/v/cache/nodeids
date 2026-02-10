@@ -1,0 +1,11 @@
+[
+  "tests/test_decomposer.py::test_extract_symbols",
+  "tests/test_decomposer.py::test_fallback_decomposition",
+  "tests/test_filters.py::test_allow_cat",
+  "tests/test_filters.py::test_block_python_c",
+  "tests/test_filters.py::test_block_sleep",
+  "tests/test_graph.py::test_empty_repo",
+  "tests/test_graph.py::test_get_neighbors",
+  "tests/test_graph.py::test_graph_build",
+  "tests/test_graph.py::test_search_symbol"
+]

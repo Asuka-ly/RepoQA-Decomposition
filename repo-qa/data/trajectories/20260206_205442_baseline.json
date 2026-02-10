@@ -1,0 +1,72 @@
+{
+  "config": {
+    "enable_graph": true,
+    "enable_graph_injection": true,
+    "enable_command_filter": true,
+    "enable_pattern_detection": false,
+    "injection_min_length": 6,
+    "max_steps": 50,
+    "name": "baseline",
+    "description": "Full system with all features enabled"
+  },
+  "repo_path": "/root/RepoQA-Project/mini-swe-agent/src/minisweagent",
+  "decomposition": {
+    "aspects": [
+      {
+        "description": "Entry point that parses command-line arguments to obtain the configuration file path or config-related flags.",
+        "entry_point": "unknown::main",
+        "symbols": [
+          "DefaultAgent",
+          "main"
+        ],
+        "priority": 1
+      },
+      {
+        "description": "Module/function that receives the CLI-provided path/flags and loads the YAML configuration from disk (file open + YAML parse).",
+        "entry_point": "unknown::load_config_from_yaml",
+        "symbols": [
+          "yaml",
+          "load_config_from_yaml"
+        ],
+        "priority": 1
+      },
+      {
+        "description": "Lower-level file I/O and YAML parsing helpers that read the file contents and convert YAML text to a Python dict.",
+        "entry_point": "unknown::read_yaml_file",
+        "symbols": [
+          "read_yaml_file",
+          "safe_load"
+        ],
+        "priority": 2
+      },
+      {
+        "description": "Configuration model class constructor that takes the parsed dict and builds the typed Config object (e.g., model config).",
+        "entry_point": "models/test_models.py::DeterministicModelConfig.__init__",
+        "symbols": [
+          "DeterministicModelConfig"
+        ],
+        "priority": 1
+      },
+      {
+        "description": "Agent initialization that receives the final Config object and uses it to configure runtime behavior.",
+        "entry_point": "agents/default.py::DefaultAgent.__init__",
+        "symbols": [
+          "DefaultAgent"
+        ],
+        "priority": 1
+      }
+    ],
+    "synthesis": "Follow the chain: the CLI entry (unknown::main) parses arguments and yields a config path/flags, which are handed to the loader (unknown::load_config_from_yaml). That loader calls the file I/O/YAML helper (unknown::read_yaml_file) to produce a Python dict, then the dict is passed into the config model constructor (models/test_models.py::DeterministicModelConfig.__init__) producing the final Config object. Finally the Config is passed into the agent constructor (agents/default.py::DefaultAgent.__init__) for runtime use.",
+    "estimated_hops": 2
+  },
+  "history": [],
+  "statistics": {
+    "total_steps": 4,
+    "viewed_files": 0,
+    "total_blocked": 0,
+    "unique_patterns": 0,
+    "most_common": null,
+    "total_injections": 2
+  },
+  "duration_seconds": 568.66368
+}

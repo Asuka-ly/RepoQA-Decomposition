@@ -1,0 +1,49 @@
+{
+  "config": {
+    "enable_graph": true,
+    "enable_graph_injection": true,
+    "enable_command_filter": true,
+    "enable_pattern_detection": false,
+    "injection_min_length": 6,
+    "max_steps": 50,
+    "name": "baseline",
+    "description": "Full system with all features enabled"
+  },
+  "repo_path": "/root/mini-swe-agent/src/minisweagent",
+  "decomposition": {
+    "aspects": [
+      {
+        "description": "Investigate how YAML configuration files are parsed and loaded into the system.",
+        "entry_point": "unknown::load_yaml_configuration",
+        "symbols": [],
+        "priority": 1
+      },
+      {
+        "description": "Trace how command-line arguments specify the configuration file to be loaded.",
+        "entry_point": "agents/interactive_textual.py::get_system_commands",
+        "symbols": [
+          "get_system_commands"
+        ],
+        "priority": 1
+      },
+      {
+        "description": "Determine how the parsed configuration data is transformed into a final Config object.",
+        "entry_point": "unknown::process_to_final_config",
+        "symbols": [],
+        "priority": 1
+      }
+    ],
+    "synthesis": "Combine findings by connecting how the configuration file is located via command-line arguments, parsed into intermediate data from YAML, and then processed into the final Config object.",
+    "estimated_hops": 2
+  },
+  "history": [],
+  "statistics": {
+    "total_steps": 0,
+    "viewed_files": 0,
+    "total_blocked": 1,
+    "unique_patterns": 1,
+    "most_common": "sleep",
+    "total_injections": 0
+  },
+  "duration_seconds": 6.957651
+}

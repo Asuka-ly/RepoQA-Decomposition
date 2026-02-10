@@ -1,0 +1,41 @@
+{
+  "config": {
+    "enable_graph": true,
+    "enable_graph_injection": true,
+    "enable_command_filter": true,
+    "enable_pattern_detection": false,
+    "injection_min_length": 6,
+    "max_steps": 50,
+    "name": "baseline",
+    "description": "Full system with all features enabled"
+  },
+  "repo_path": "/root/mini-swe-agent/src/minisweagent",
+  "decomposition": {
+    "aspects": [
+      {
+        "description": "Identify how the YAML configuration is loaded from the command-line argument",
+        "entry_point": "unknown::load_config_from_args",
+        "symbols": [],
+        "priority": 1
+      },
+      {
+        "description": "Trace the flow from the loaded YAML content to the final Config object transformation",
+        "entry_point": "unknown::Config",
+        "symbols": [],
+        "priority": 2
+      }
+    ],
+    "synthesis": "Combine findings by mapping how the command-line argument is processed to extract YAML configuration and how this is converted into the final Config object.",
+    "estimated_hops": 2
+  },
+  "history": [],
+  "statistics": {
+    "total_steps": 0,
+    "viewed_files": 0,
+    "total_blocked": 1,
+    "unique_patterns": 1,
+    "most_common": "sleep",
+    "total_injections": 0
+  },
+  "duration_seconds": 5.817434
+}

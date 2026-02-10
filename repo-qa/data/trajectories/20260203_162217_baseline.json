@@ -1,0 +1,46 @@
+{
+  "config": {
+    "enable_graph": true,
+    "enable_graph_injection": true,
+    "enable_command_filter": true,
+    "enable_pattern_detection": false,
+    "injection_min_length": 6,
+    "max_steps": 50,
+    "name": "baseline",
+    "description": "Full system with all features enabled"
+  },
+  "repo_path": "/root/mini-swe-agent/src/minisweagent",
+  "decomposition": {
+    "aspects": [
+      {
+        "description": "Investigate how LocalEnvironment.execute handles a timeout scenario.",
+        "entry_point": "environments/local.py::LocalEnvironment.execute",
+        "symbols": [
+          "LocalEnvironment"
+        ],
+        "priority": 1
+      },
+      {
+        "description": "Investigate how DefaultAgent processes execution results, including errors like ExecutionTimeoutError.",
+        "entry_point": "agents/default.py::DefaultAgent.execute_action",
+        "symbols": [
+          "DefaultAgent",
+          "execute_action"
+        ],
+        "priority": 2
+      }
+    ],
+    "synthesis": "Combine findings by tracing errors from LocalEnvironment through its interactions with DefaultAgent to understand how timeouts result in an ExecutionTimeoutError.",
+    "estimated_hops": 2
+  },
+  "history": [],
+  "statistics": {
+    "total_steps": 0,
+    "viewed_files": 0,
+    "total_blocked": 0,
+    "unique_patterns": 0,
+    "most_common": "None",
+    "total_injections": 0
+  },
+  "duration_seconds": 9.413871
+}

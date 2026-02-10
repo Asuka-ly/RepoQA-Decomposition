@@ -1,0 +1,51 @@
+{
+  "config": {
+    "enable_graph": true,
+    "enable_graph_injection": true,
+    "enable_command_filter": true,
+    "enable_pattern_detection": false,
+    "injection_min_length": 6,
+    "max_steps": 50,
+    "name": "baseline",
+    "description": "Full system with all features enabled"
+  },
+  "repo_path": "/root/RepoQA-Project/mini-swe-agent/src/minisweagent",
+  "decomposition": {
+    "aspects": [
+      {
+        "description": "Investigate how YAML configuration files are loaded by the mini-swe-agent",
+        "entry_point": "unknown::load_config_from_yaml",
+        "symbols": [],
+        "priority": 1
+      },
+      {
+        "description": "Trace how configuration is initialized into the Config object",
+        "entry_point": "models/test_models.py::DeterministicModelConfig.__init__",
+        "symbols": [
+          "DeterministicModelConfig"
+        ],
+        "priority": 2
+      },
+      {
+        "description": "Investigate if the command-line argument interacts with configuration loading",
+        "entry_point": "agents/default.py::DefaultAgent.__init__",
+        "symbols": [
+          "DefaultAgent"
+        ],
+        "priority": 3
+      }
+    ],
+    "synthesis": "Combine findings on YAML parsing, Config object construction, and command-line argument initialization to trace the complete flow of configuration loading.",
+    "estimated_hops": 2
+  },
+  "history": [],
+  "statistics": {
+    "total_steps": 0,
+    "viewed_files": 4,
+    "total_blocked": 0,
+    "unique_patterns": 0,
+    "most_common": null,
+    "total_injections": 3
+  },
+  "duration_seconds": 62.682423
+}

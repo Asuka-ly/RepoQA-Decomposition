@@ -1,0 +1,8 @@
+name: "minimal"
+description: "Minimal configuration for debugging"
+enable_graph: false
+enable_graph_injection: false
+enable_command_filter: false
+enable_pattern_detection: false
+injection_min_length: 6
+max_steps: 20

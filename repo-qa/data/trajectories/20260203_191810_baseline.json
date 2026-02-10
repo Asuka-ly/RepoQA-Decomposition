@@ -1,0 +1,51 @@
+{
+  "config": {
+    "enable_graph": true,
+    "enable_graph_injection": true,
+    "enable_command_filter": true,
+    "enable_pattern_detection": false,
+    "injection_min_length": 6,
+    "max_steps": 50,
+    "name": "baseline",
+    "description": "Full system with all features enabled"
+  },
+  "repo_path": "/root/mini-swe-agent/src/minisweagent",
+  "decomposition": {
+    "aspects": [
+      {
+        "description": "Trace how the command-line argument for YAML configuration is parsed.",
+        "entry_point": "unknown::parse_command_line_arguments",
+        "symbols": [],
+        "priority": 1
+      },
+      {
+        "description": "Investigate how the YAML file is read and parsed into a data structure.",
+        "entry_point": "run/extra/utils/batch_progress.py::_save_overview_data_yaml",
+        "symbols": [
+          "_save_overview_data_yaml"
+        ],
+        "priority": 1
+      },
+      {
+        "description": "Check the flow from the parsed YAML data structure to the final Config object initialization.",
+        "entry_point": "models/test_models.py::DeterministicModelConfig.__init__",
+        "symbols": [
+          "DeterministicModelConfig"
+        ],
+        "priority": 1
+      }
+    ],
+    "synthesis": "Follow the command-line argument parsing, YAML file reading, and data transfer flow to the final Config object to infer the complete process.",
+    "estimated_hops": 2
+  },
+  "history": [],
+  "statistics": {
+    "total_steps": 0,
+    "viewed_files": 0,
+    "total_blocked": 1,
+    "unique_patterns": 1,
+    "most_common": "sleep",
+    "total_injections": 0
+  },
+  "duration_seconds": 6.576273
+}

@@ -1,0 +1,3 @@
+{
+  "tests/test_filters.py::test_block_python_c": true
+}

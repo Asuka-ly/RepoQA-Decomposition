@@ -1,0 +1,63 @@
+{
+  "config": {
+    "enable_graph": true,
+    "enable_graph_injection": true,
+    "enable_command_filter": true,
+    "enable_pattern_detection": false,
+    "injection_min_length": 6,
+    "max_steps": 50,
+    "name": "baseline",
+    "description": "Full system with all features enabled"
+  },
+  "repo_path": "/root/RepoQA-Project/mini-swe-agent/src/minisweagent",
+  "decomposition": {
+    "aspects": [
+      {
+        "description": "Parse command-line arguments to obtain the path to the YAML configuration (entry point that hands off the YAML path and flags).",
+        "entry_point": "unknown::main",
+        "symbols": [
+          "DefaultAgent"
+        ],
+        "priority": 1
+      },
+      {
+        "description": "Load and parse the YAML file from disk into raw Python structures (dicts/lists).",
+        "entry_point": "unknown::load_yaml_file",
+        "symbols": [
+          "unknown::load_yaml"
+        ],
+        "priority": 1
+      },
+      {
+        "description": "Construct Config objects/dataclasses from the parsed YAML, including model-specific config classes.",
+        "entry_point": "models/test_models.py::DeterministicModelConfig.__init__",
+        "symbols": [
+          "DeterministicModelConfig",
+          "Config"
+        ],
+        "priority": 1
+      },
+      {
+        "description": "Consume the constructed Config object when initializing the agent and starting runtime components.",
+        "entry_point": "agents/default.py::DefaultAgent.__init__",
+        "symbols": [
+          "DefaultAgent",
+          "Config"
+        ],
+        "priority": 1
+      }
+    ],
+    "synthesis": "Follow four independent tracks in parallel: (1) the CLI entry point provides the YAML path, (2) a YAML loader reads and parses that file to raw dicts, (3) constructors/dataclasses (e.g., DeterministicModelConfig) transform the parsed data into typed Config objects, and (4) the final Config object is passed into the agent initialization (DefaultAgent.__init__) to start the system. Trace each entry point to verify how data flows between these steps.",
+    "estimated_hops": 2
+  },
+  "history": [],
+  "statistics": {
+    "total_steps": 3,
+    "viewed_files": 0,
+    "total_blocked": 0,
+    "unique_patterns": 0,
+    "most_common": null,
+    "total_injections": 2
+  },
+  "duration_seconds": 72.022194
+}

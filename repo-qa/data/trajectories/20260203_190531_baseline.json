@@ -1,0 +1,47 @@
+{
+  "config": {
+    "enable_graph": true,
+    "enable_graph_injection": true,
+    "enable_command_filter": true,
+    "enable_pattern_detection": false,
+    "injection_min_length": 6,
+    "max_steps": 50,
+    "name": "baseline",
+    "description": "Full system with all features enabled"
+  },
+  "repo_path": "/root/mini-swe-agent/src/minisweagent",
+  "decomposition": {
+    "aspects": [
+      {
+        "description": "Identify how the command-line arguments are parsed and processed to retrieve the YAML file path.",
+        "entry_point": "unknown::parse_command_line_arguments",
+        "symbols": [],
+        "priority": 1
+      },
+      {
+        "description": "Trace how the YAML file specified in the command-line arguments is read and loaded into Python objects.",
+        "entry_point": "unknown::load_yaml_file",
+        "symbols": [],
+        "priority": 1
+      },
+      {
+        "description": "Analyze how the contents of the YAML file are converted into the final Config object.",
+        "entry_point": "unknown::process_yaml_into_config",
+        "symbols": [],
+        "priority": 1
+      }
+    ],
+    "synthesis": "Combine findings to describe the end-to-end flow from command-line argument parsing, YAML file loading, to the creation of the final Config object.",
+    "estimated_hops": 2
+  },
+  "history": [],
+  "statistics": {
+    "total_steps": 0,
+    "viewed_files": 0,
+    "total_blocked": 1,
+    "unique_patterns": 1,
+    "most_common": "sleep",
+    "total_injections": 0
+  },
+  "duration_seconds": 3.886593
+}

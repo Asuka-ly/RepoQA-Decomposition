@@ -1,0 +1,19 @@
+# 核心框架
+mini-swe-agent==1.17.5
+
+# 代码解析
+tree-sitter==0.25.2
+tree-sitter-python==0.25.0
+
+# 图处理
+networkx==3.4.2
+
+# LLM 调用
+litellm>=1.81.5
+
+# 配置管理
+python-dotenv>=1.0.0
+pyyaml>=6.0
+
+# 开发工具
+pytest>=7.0.0
