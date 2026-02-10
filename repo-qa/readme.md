@@ -10,6 +10,8 @@
 
 ## 快速开始
 1. 运行配置脚本：`bash setup.sh`
+   - 非交互模式：`bash setup.sh --yes`
+   - 从指定密钥文件加载：`bash setup.sh --yes --env-file /path/to/secure.env`
 2. 安装依赖：`pip install -r requirements.txt`
 3. 配置 API：编辑 `.env` 文件。
 4. 运行单次测试：`python scripts/run_single.py`
