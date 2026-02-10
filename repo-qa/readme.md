@@ -17,6 +17,20 @@
 4. 运行单次测试：`python scripts/run_single.py`
 5. 运行消融实验：`python scripts/run_ablation.py`
 
+可选网络参数（若环境必须走代理）：
+- `python scripts/run_single.py --keep-proxy`
+- `python scripts/run_ablation.py --keep-proxy`
+
+离线模式（不调用外部 API）：
+- `python scripts/run_single.py --offline --question-file q3_default_agent_action_flow.txt`
+- `python scripts/run_ablation.py --offline --question-file q4_message_history_flow.txt`
+
+轨迹质量检查：
+- `python scripts/analyze_trajectory.py --config baseline`
+
+离线冒烟实验（无外部 API）：
+- `python scripts/run_offline_smoke.py`
+
 ## 投稿计划
 - COLM 2025 (Deadline: 3.27)
 - NeurIPS 2025 (Deadline: 5月)

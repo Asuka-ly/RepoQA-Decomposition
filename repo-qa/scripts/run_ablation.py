@@ -1,15 +1,11 @@
 """消融实验脚本 - 完整版"""
 import os
 import sys
+import argparse
 from pathlib import Path
 import yaml
 import json
 from datetime import datetime
-
-# ===== 网络修复（关键！）=====
-os.environ.pop("http_proxy", None)
-os.environ.pop("https_proxy", None)
-os.environ.pop("all_proxy", None)
 
 import litellm
 litellm.ssl_verify = False
@@ -21,10 +17,57 @@ from src.agents import StrategicRepoQAAgent, VanillaRepoQAAgent
 from src.config import ExperimentConfig
 
 from minisweagent.models import get_model
+from minisweagent.models.test_models import DeterministicModel
 from minisweagent.environments.local import LocalEnvironment
 from minisweagent import package_dir
 
-def run_single_experiment(agent_class, config_name, task, repo_path):
+
+def _configure_network(keep_proxy: bool):
+    """网络配置：默认清除代理；必要时可保留。"""
+    if not keep_proxy:
+        for key in [
+            "http_proxy", "https_proxy", "all_proxy",
+            "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+            "REQUESTS_CA_BUNDLE", "SSL_CERT_FILE",
+        ]:
+            os.environ.pop(key, None)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Run ablation experiments for RepoQA")
+    parser.add_argument("--keep-proxy", action="store_true", help="Do not clear proxy env vars")
+    parser.add_argument("--question-file", default="q2_config_loading.txt", help="Question filename in data/questions")
+    parser.add_argument("--repo-path", default=None, help="Override target repository path")
+    parser.add_argument("--offline", action="store_true", help="Use deterministic offline model")
+    return parser.parse_args()
+
+
+def _offline_outputs(agent_name: str, repo_path: str) -> list[str]:
+    if agent_name == "baseline":
+        decomp_json = (
+            '{"sub_questions":[{"id":"SQ1","sub_question":"How does DefaultAgent parse and execute actions?",'
+            '"hypothesis":"parse_action validates bash action before execute",'
+            '"entry_candidates":["agents/default.py::DefaultAgent.parse_action"],'
+            '"symbols":["DefaultAgent","parse_action"],'
+            '"required_evidence":["definition location","call path"],'
+            '"exit_criterion":"2 grounded evidence items","status":"open","priority":1}],'
+            '"synthesis":"Combine parser and run loop","estimated_hops":2,"unresolved_symbols":[]}'
+        )
+        return [
+            decomp_json,
+            f"Find DefaultAgent\n```bash\ncd {repo_path} && rg \"class DefaultAgent\" agents/default.py\n```",
+            f"Read parser\n```bash\ncd {repo_path} && nl -ba agents/default.py | sed -n '130,190p'\n```",
+            f"Read run\n```bash\ncd {repo_path} && nl -ba agents/default.py | sed -n '190,260p'\n```",
+            "## FINAL ANSWER\nEvidence in src/minisweagent/agents/default.py:138 and src/minisweagent/agents/default.py:246\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\n```",
+        ]
+
+    return [
+        f"List repo\n```bash\ncd {repo_path} && ls\n```",
+        f"Read default.py\n```bash\ncd {repo_path} && nl -ba agents/default.py | sed -n '130,190p'\n```",
+        "## FINAL ANSWER\nEvidence in src/minisweagent/agents/default.py:138\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\n```",
+    ]
+
+def run_single_experiment(agent_class, config_name, task, repo_path, offline: bool = False):
     """运行单个实验"""
     print("\n" + "🔬"*30)
     print(f"   Running: {config_name}")
@@ -44,7 +87,10 @@ def run_single_experiment(agent_class, config_name, task, repo_path):
     
     print(f"🤖 Initializing model: {model_name}")
     
-    model = get_model(input_model_name=model_name)
+    if offline:
+        model = DeterministicModel(outputs=_offline_outputs(config_name, repo_path))
+    else:
+        model = get_model(input_model_name=model_name)
     env = LocalEnvironment()
     
     # 加载 agent 配置
@@ -106,12 +152,17 @@ def cleanup_experiment_artifacts(repo_path: str):
 
 
 def main():
+    args = parse_args()
+    _configure_network(keep_proxy=args.keep_proxy)
+
     # 测试问题
-    task_file = PATH_CONFIG.repo_qa_root / "data" / "questions" / "q2_config_loading.txt"
+    task_file = PATH_CONFIG.repo_qa_root / "data" / "questions" / args.question_file
+    if not task_file.exists():
+        raise FileNotFoundError(f"Question file not found: {task_file}")
     with open(task_file) as f:
         task = f.read()
     
-    repo_path = PATH_CONFIG.get_test_repo_path()
+    repo_path = args.repo_path or PATH_CONFIG.get_test_repo_path()
     
     # 实验配置
     experiments = [
@@ -127,7 +178,7 @@ def main():
         print(f"{'='*60}")
         
         try:
-            stats = run_single_experiment(agent_class, config_name, task, repo_path)
+            stats = run_single_experiment(agent_class, config_name, task, repo_path, offline=args.offline)
             results.append(stats)
             
             print(f"\n📊 Results:")
