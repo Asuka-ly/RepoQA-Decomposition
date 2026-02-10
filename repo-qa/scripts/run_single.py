@@ -25,9 +25,12 @@ from minisweagent import package_dir
 def _configure_network(keep_proxy: bool):
     """网络配置：默认清除代理；必要时可保留。"""
     if not keep_proxy:
-        os.environ.pop("http_proxy", None)
-        os.environ.pop("https_proxy", None)
-        os.environ.pop("all_proxy", None)
+        for key in [
+            "http_proxy", "https_proxy", "all_proxy",
+            "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+            "REQUESTS_CA_BUNDLE", "SSL_CERT_FILE",
+        ]:
+            os.environ.pop(key, None)
 
 
 def parse_args():
