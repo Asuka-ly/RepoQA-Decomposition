@@ -1,13 +1,9 @@
 """单问题运行脚本 - 适配新架构"""
 import os
 import sys
+import argparse
 from pathlib import Path
 import yaml
-
-# ===== 网络修复：清除 Autodl 代理 =====
-os.environ.pop("http_proxy", None)
-os.environ.pop("https_proxy", None)
-os.environ.pop("all_proxy", None)
 
 # 禁用 SSL 验证（应对代理问题）
 import litellm
@@ -22,10 +18,61 @@ from src.agents import StrategicRepoQAAgent  # 使用带分解的版本
 from src.config import ExperimentConfig
 
 from minisweagent.models import get_model
+from minisweagent.models.test_models import DeterministicModel
 from minisweagent.environments.local import LocalEnvironment
 from minisweagent import package_dir
 
+def _configure_network(keep_proxy: bool):
+    """网络配置：默认清除代理；必要时可保留。"""
+    if not keep_proxy:
+        for key in [
+            "http_proxy", "https_proxy", "all_proxy",
+            "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY",
+            "REQUESTS_CA_BUNDLE", "SSL_CERT_FILE",
+        ]:
+            os.environ.pop(key, None)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Run single RepoQA experiment")
+    parser.add_argument("--keep-proxy", action="store_true", help="Do not clear proxy env vars")
+    parser.add_argument("--config", default="baseline", help="Config name in repo-qa/configs")
+    parser.add_argument("--question-file", default="q2_config_loading.txt", help="Question filename in data/questions")
+    parser.add_argument("--repo-path", default=None, help="Override target repository path")
+    parser.add_argument("--offline", action="store_true", help="Use deterministic offline model (no external API)")
+    return parser.parse_args()
+
+
+def _offline_outputs(repo_path: str):
+    decomp_json = (
+        '{"sub_questions":[{"id":"SQ1","sub_question":"How does DefaultAgent parse and execute actions?",'
+        '"hypothesis":"parse_action validates bash action before execute",'
+        '"entry_candidates":["agents/default.py::DefaultAgent.parse_action"],'
+        '"symbols":["DefaultAgent","parse_action"],'
+        '"required_evidence":["definition location","call path"],'
+        '"exit_criterion":"2 grounded evidence items","status":"open","priority":1}],'
+        '"synthesis":"Combine parser and run loop","estimated_hops":2,"unresolved_symbols":[]}'
+    )
+    return [
+        decomp_json,
+        f'Find DefaultAgent\n```bash\ncd {repo_path} && rg "class DefaultAgent" agents/default.py\n```',
+        f'Find parse_action line\n```bash\ncd {repo_path} && rg -n "def parse_action" agents/default.py\n```',
+        f"Read parse_action with lines\n```bash\ncd {repo_path} && nl -ba agents/default.py | sed -n '120,180p'\n```",
+        f"Read run loop with lines\n```bash\ncd {repo_path} && nl -ba agents/default.py | sed -n '180,250p'\n```",
+        (
+            "## FINAL ANSWER\n"
+            "`DefaultAgent.parse_action` is defined in `agents/default.py` and its line location is confirmed via `rg -n`; "
+            "the execution/observation handling is in the later run-loop block from `nl -ba` output."
+            "\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\n```"
+        ),
+    ]
+
+
+
 def main():
+    args = parse_args()
+    _configure_network(keep_proxy=args.keep_proxy)
+
     print("\n" + "="*60)
     print("🔍 Validating environment...")
     print("="*60 + "\n")
@@ -34,17 +81,22 @@ def main():
         print("\n❌ Path validation failed!")
         return
     
-    # 检查 API Key
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key or api_key == "your-api-key-here":
-        print("❌ Error: Please set OPENAI_API_KEY in .env file")
-        return
-    
-    print(f"✓ API Key loaded (length: {len(api_key)})")
+    if not args.offline:
+        # 检查 API Key
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key or api_key == "your-api-key-here":
+            print("❌ Error: Please set OPENAI_API_KEY in .env file")
+            return
+        print(f"✓ API Key loaded (length: {len(api_key)})")
+    else:
+        print("✓ Offline mode enabled: deterministic model")
     
     # 加载配置
-    config_path = PATH_CONFIG.repo_qa_root / "configs" / "baseline.yaml"
+    config_path = PATH_CONFIG.repo_qa_root / "configs" / f"{args.config}.yaml"
     print(f"\n📋 Loading config from: {config_path}")
+    if not config_path.exists():
+        print(f"❌ Error: Config file not found: {config_path}")
+        return
     exp_config = ExperimentConfig.from_yaml(str(config_path))
     print(f"✓ Config loaded: {exp_config.name}")
     
@@ -63,7 +115,11 @@ def main():
         print(f"   Using API Base: {api_base}")
         os.environ["OPENAI_API_BASE"] = api_base
     
-    model = get_model(input_model_name=model_name)
+    repo_path = args.repo_path or PATH_CONFIG.get_test_repo_path()
+    if args.offline:
+        model = DeterministicModel(outputs=_offline_outputs(repo_path))
+    else:
+        model = get_model(input_model_name=model_name)
     env = LocalEnvironment()
     
     # 加载 mini-swe-agent 配置
@@ -75,8 +131,8 @@ def main():
     agent = StrategicRepoQAAgent(model, env, exp_config, **agent_config["agent"])
     
     # 加载测试问题
-    repo_path = PATH_CONFIG.get_test_repo_path()
-    task_file = PATH_CONFIG.repo_qa_root / "data" / "questions" / "q2_config_loading.txt"
+    repo_path = args.repo_path or PATH_CONFIG.get_test_repo_path()
+    task_file = PATH_CONFIG.repo_qa_root / "data" / "questions" / args.question_file
     
     if not task_file.exists():
         print(f"❌ Error: Task file not found: {task_file}")

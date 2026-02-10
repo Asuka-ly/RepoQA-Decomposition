@@ -132,8 +132,14 @@ def build_task_prompt(task: str, repo_path: str, decomposition: Dict = None, con
     
     # 安全处理 None
     decomp_data = decomposition if decomposition is not None else {}
-    aspects_list = decomp_data.get('aspects', [])
-    aspects = sorted(aspects_list, key=lambda x: x.get('priority', 99))
+    subq_list = decomp_data.get('sub_questions')
+    if isinstance(subq_list, list) and subq_list:
+        aspects = sorted(subq_list, key=lambda x: x.get('priority', 99))
+        use_subq = True
+    else:
+        aspects_list = decomp_data.get('aspects', [])
+        aspects = sorted(aspects_list, key=lambda x: x.get('priority', 99))
+        use_subq = False
     
     lines = [
         "You are a CODE ANALYSIS SPECIALIST solving a repository-level question in READ-ONLY mode.",
@@ -158,8 +164,15 @@ def build_task_prompt(task: str, repo_path: str, decomposition: Dict = None, con
     
     if aspects:
         for i, aspect in enumerate(aspects, 1):
-            lines.append(f" ASPECT {i}: {aspect.get('description', 'N/A')}")
-            lines.append(f" Entry Point: {aspect.get('entry_point', 'Unknown')}")
+            if use_subq:
+                lines.append(f" SUB-QUESTION {i} [{aspect.get('id', f'SQ{i}')}]: {aspect.get('sub_question', 'N/A')}")
+                lines.append(f" Hypothesis: {aspect.get('hypothesis', 'N/A')}")
+                lines.append(f" Entry Candidates: {', '.join(aspect.get('entry_candidates', [])) or 'Unknown'}")
+                lines.append(f" Required Evidence: {', '.join(aspect.get('required_evidence', [])) or 'N/A'}")
+                lines.append(f" Done When: {aspect.get('exit_criterion', 'N/A')}")
+            else:
+                lines.append(f" ASPECT {i}: {aspect.get('description', 'N/A')}")
+                lines.append(f" Entry Point: {aspect.get('entry_point', 'Unknown')}")
             lines.append("")
     else:
         lines.append(" Explore the directory structure and locate main logic.")
