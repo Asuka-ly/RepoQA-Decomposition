@@ -198,6 +198,13 @@ class BaseRepoQAAgent(DefaultAgent):
             # ⚠️ 记录完整对话历史，用于后续复盘
             "history": self.messages 
         }
+
+        # 可选：保存子问题状态轨迹（供后续 RL 使用）
+        if hasattr(self, "subq_manager") and getattr(self, "subq_manager") is not None:
+            try:
+                data["subquestion_trace"] = self.subq_manager.snapshot()
+            except Exception:
+                pass
         
         with open(output_path / filename, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
