@@ -55,11 +55,10 @@ def _offline_outputs(agent_name: str, repo_path: str) -> list[str]:
         )
         return [
             decomp_json,
-            f'Find DefaultAgent\n```bash\ncd {repo_path} && rg "class DefaultAgent" agents/default.py\n```',
-            f'Find parse_action line\n```bash\ncd {repo_path} && rg -n "def parse_action" agents/default.py\n```',
-            f"Read parser\n```bash\ncd {repo_path} && nl -ba agents/default.py | sed -n '120,180p'\n```",
-            f"Read run loop\n```bash\ncd {repo_path} && nl -ba agents/default.py | sed -n '180,250p'\n```",
-            "## FINAL ANSWER\nEvidence from rg -n and nl -ba in agents/default.py confirms parse_action and run-loop locations.\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\n```",
+            f"Find DefaultAgent\n```bash\ncd {repo_path} && rg \"class DefaultAgent\" agents/default.py\n```",
+            f"Read parser\n```bash\ncd {repo_path} && nl -ba agents/default.py | sed -n '130,190p'\n```",
+            f"Read run\n```bash\ncd {repo_path} && nl -ba agents/default.py | sed -n '190,260p'\n```",
+            "## FINAL ANSWER\nEvidence in src/minisweagent/agents/default.py:138 and src/minisweagent/agents/default.py:246\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\n```",
         ]
 
     return [
@@ -67,7 +66,6 @@ def _offline_outputs(agent_name: str, repo_path: str) -> list[str]:
         f"Read default.py\n```bash\ncd {repo_path} && nl -ba agents/default.py | sed -n '130,190p'\n```",
         "## FINAL ANSWER\nEvidence in src/minisweagent/agents/default.py:138\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\n```",
     ]
-
 
 def run_single_experiment(agent_class, config_name, task, repo_path, offline: bool = False):
     """运行单个实验"""

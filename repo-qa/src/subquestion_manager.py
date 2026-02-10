@@ -39,83 +39,41 @@ class SubQuestionManager:
             return
 
         signal = f"action={action[:80]}"
-        combined_text = f"{action}\n{observation}\n{graph_hint}".lower()
-
         for sq in self.sub_questions:
             before_status = sq.get("status", "open")
             before_progress = float(sq.get("progress", 0.0))
 
             required = [x.lower() for x in sq.get("required_evidence", [])]
             hit_score = 0.0
-            evidence_found = sq.setdefault("evidence_found", [])
 
-            symbol_hits = 0
+            combined_text = f"{action}\n{observation}\n{graph_hint}".lower()
+            for req in required:
+                # 关键词命中可作为弱证据
+                key = req.split()[0] if req else ""
+                if key and key in combined_text:
+                    hit_score += 0.25
+
             for symbol in sq.get("symbols", []):
                 if symbol.lower() in combined_text:
-                    symbol_hits += 1
                     hit_score += 0.2
 
-            required_hits = 0
-            for req in required:
-                tokens = [
-                    t for t in re.findall(r"[a-z_]{3,}", req)
-                    if t not in {"the", "for", "with", "from", "and"}
-                ]
-                if tokens and any(t in combined_text for t in tokens):
-                    required_hits += 1
-                    hit_score += 0.2
-
-            entry_hits = 0
-            for entry in sq.get("entry_candidates", []):
-                if isinstance(entry, str) and entry.lower() in combined_text:
-                    entry_hits += 1
-                    hit_score += 0.15
-
-            is_targeted = (symbol_hits + required_hits + entry_hits) > 0
-
-            # 行号/文件命中代表更强证据；只有命中当前子问题才算强证据
-            refs = re.findall(r"\b[\w/.-]+\.py:\d+\b", observation)
-            if refs and is_targeted:
+            # 行号/文件命中代表更强证据
+            if re.search(r"\b\w+\.py:\d+\b", observation):
                 hit_score += 0.35
-                for ref in refs:
-                    if ref not in evidence_found:
-                        evidence_found.append(ref)
-
-            # `nl -ba file.py` 风格：输出常为纯行号+代码，无 file:line
-            if is_targeted and ".py" in action and re.search(r"^\s*\d+\s+", observation, re.MULTILINE):
-                hit_score += 0.2
-                file_match = re.search(r"([\w/.-]+\.py)", action)
-                pseudo_ref = f"{file_match.group(1)}:nl" if file_match else "unknown.py:nl"
-                if pseudo_ref not in evidence_found:
-                    evidence_found.append(pseudo_ref)
-
-            # `rg -n symbol file.py` 输出通常是 `123:...`，可结合 action 里的文件名构造证据
-            if is_targeted and re.search(r"^\s*\d+:", observation, re.MULTILINE) and ".py" in action:
-                hit_score += 0.2
-                file_match = re.search(r"([\w/.-]+\.py)", action)
-                line_match = re.search(r"^\s*(\d+):", observation, re.MULTILINE)
-                if file_match and line_match:
-                    rg_ref = f"{file_match.group(1)}:{line_match.group(1)}"
-                    if rg_ref not in evidence_found:
-                        evidence_found.append(rg_ref)
 
             # 图提示命中
-            if is_targeted and "[graph hint]" in graph_hint.lower():
+            if "[graph hint]" in graph_hint.lower():
                 hit_score += 0.2
 
             new_progress = min(1.0, before_progress + hit_score)
             sq["progress"] = round(new_progress, 3)
             sq["attempts"] = int(sq.get("attempts", 0)) + 1
 
-            if len(evidence_found) >= 2:
-                sq["status"] = "satisfied"
-            elif new_progress >= 0.4 and len(evidence_found) >= 1:
-                sq["status"] = "satisfied"
-            elif new_progress >= 1.0:
+            if new_progress >= 1.0:
                 sq["status"] = "satisfied"
             elif hit_score > 0:
                 sq["status"] = "in_progress"
-            elif sq["attempts"] >= 5 and new_progress < 0.3:
+            elif sq["attempts"] >= 4 and new_progress < 0.35:
                 sq["status"] = "blocked"
             else:
                 sq["status"] = before_status or "open"

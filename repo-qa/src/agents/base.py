@@ -53,7 +53,7 @@ class BaseRepoQAAgent(DefaultAgent):
                     }
                 logger.warning("🚫 SUBMISSION REJECTED: insufficient evidence")
                 return {
-                    "output": "Submission blocked: need broader code evidence and stronger sub-question completion before final submission.",
+                    "output": "Submission blocked: gather more code evidence (need >=1 viewed .py file and non-trivial progress).",
                     "returncode": 0
                 }
             
@@ -70,36 +70,19 @@ class BaseRepoQAAgent(DefaultAgent):
         logger.info("✓ Filter installed successfully")
 
     def _can_submit(self) -> bool:
-        """提交前门槛：避免过早提交，要求有覆盖度与可追溯证据。"""
-        step_count = max(0, (len(getattr(self, "messages", [])) - 2) // 2)
-        manager = getattr(self, "subq_manager", None)
-
-        # strategic 模式下按子问题规模设置最小浏览文件数，普通模式至少 1 个
-        total_subq = len(getattr(manager, "sub_questions", []) or []) if manager is not None else 0
-        min_viewed = 2 if total_subq >= 3 else 1
-        if len(self.viewed_files) < min_viewed:
+        """提交前门槛，降低过早提交噪声。"""
+        # 至少要读过一个 .py 文件
+        if len(self.viewed_files) < 1:
             return False
 
-        # strategic 模式下，至少完成一半子问题（且多子问题时至少 2 个），并有证据引用
-        if manager is not None and getattr(manager, "sub_questions", None):
-            subq = manager.sub_questions
-            total = len(subq)
-            satisfied = sum(1 for x in subq if x.get("status") == "satisfied")
-            progressed = sum(1 for x in subq if float(x.get("progress", 0.0)) >= 0.6)
-            evidence_refs = sum(len(x.get("evidence_found", [])) for x in subq)
+        # 若是 strategic agent，要求 subq 至少有进度或完成
+        if hasattr(self, "subq_manager") and getattr(self, "subq_manager") is not None:
+            subq = getattr(self, "subq_manager").sub_questions
+            if subq:
+                progressed = any(float(x.get("progress", 0.0)) >= 0.2 or x.get("status") == "satisfied" for x in subq)
+                return progressed
 
-            min_satisfied = 1 if total <= 2 else max(2, (total + 1) // 2)
-            if satisfied < min_satisfied:
-                return False
-            if evidence_refs < min_satisfied:
-                return False
-            if satisfied + progressed < min(total, min_satisfied + 1):
-                return False
-
-            # 防止 1~2 步就尝试提交
-            return step_count >= 3
-
-        return step_count >= 2
+        return True
     
     def _is_submit_signal(self, command: str) -> bool:
         """检测提交信号"""

@@ -31,14 +31,7 @@ def analyze(data: Dict[str, Any]) -> Dict[str, Any]:
     sub_questions = trace.get("sub_questions", [])
     replan_events = trace.get("replan_events", [])
 
-    answer_refs = set(re.findall(r"\b[\w/.-]+\.py:\d+\b", answer))
-    trace_refs = set()
-    for sq in sub_questions:
-        for ref in sq.get("evidence_found", []) or []:
-            if isinstance(ref, str) and re.match(r"^[\w/.-]+\.py:(\d+|nl)$", ref):
-                trace_refs.add(ref)
-
-    evidence_refs = answer_refs | trace_refs
+    evidence_refs = re.findall(r"\b[\w/.-]+\.py:\d+\b", answer)
     has_final_answer = isinstance(answer, str) and len(answer.strip()) > 0 and not answer.startswith("ERROR:")
 
     satisfied = sum(1 for sq in sub_questions if sq.get("status") == "satisfied")
@@ -46,7 +39,7 @@ def analyze(data: Dict[str, Any]) -> Dict[str, Any]:
 
     quality_flags = {
         "missing_final_answer": not has_final_answer,
-        "missing_evidence_refs": len(evidence_refs) == 0,
+        "missing_evidence_refs": len(set(evidence_refs)) == 0,
         "no_code_reads": (stats.get("viewed_files", 0) or 0) == 0,
     }
 
@@ -55,7 +48,7 @@ def analyze(data: Dict[str, Any]) -> Dict[str, Any]:
         "viewed_files": stats.get("viewed_files", 0),
         "has_final_answer": has_final_answer,
         "answer_length": len(answer),
-        "evidence_ref_count": len(evidence_refs),
+        "evidence_ref_count": len(set(evidence_refs)),
         "sub_questions_total": len(sub_questions),
         "sub_questions_satisfied": satisfied,
         "sub_questions_blocked": blocked,
