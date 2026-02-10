@@ -45,7 +45,6 @@ class SubQuestionManager:
 
             required = [x.lower() for x in sq.get("required_evidence", [])]
             hit_score = 0.0
-            evidence_found = sq.setdefault("evidence_found", [])
 
             combined_text = f"{action}\n{observation}\n{graph_hint}".lower()
             for req in required:
@@ -59,20 +58,8 @@ class SubQuestionManager:
                     hit_score += 0.2
 
             # 行号/文件命中代表更强证据
-            refs = re.findall(r"\b[\w/.-]+\.py:\d+\b", observation)
-            if refs:
+            if re.search(r"\b\w+\.py:\d+\b", observation):
                 hit_score += 0.35
-                for ref in refs:
-                    if ref not in evidence_found:
-                        evidence_found.append(ref)
-
-            # `nl -ba file.py` 风格：输出常为纯行号+代码，无 file:line
-            if ".py" in action and re.search(r"^\s*\d+\s+", observation, re.MULTILINE):
-                hit_score += 0.2
-                file_match = re.search(r"([\w/.-]+\.py)", action)
-                pseudo_ref = f"{file_match.group(1)}:nl" if file_match else "unknown.py:nl"
-                if pseudo_ref not in evidence_found:
-                    evidence_found.append(pseudo_ref)
 
             # 图提示命中
             if "[graph hint]" in graph_hint.lower():
@@ -82,11 +69,7 @@ class SubQuestionManager:
             sq["progress"] = round(new_progress, 3)
             sq["attempts"] = int(sq.get("attempts", 0)) + 1
 
-            if len(evidence_found) >= 2:
-                sq["status"] = "satisfied"
-            elif new_progress >= 0.4 and len(evidence_found) >= 1:
-                sq["status"] = "satisfied"
-            elif new_progress >= 1.0:
+            if new_progress >= 1.0:
                 sq["status"] = "satisfied"
             elif hit_score > 0:
                 sq["status"] = "in_progress"
