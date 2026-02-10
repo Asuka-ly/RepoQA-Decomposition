@@ -44,10 +44,16 @@ class BaseRepoQAAgent(DefaultAgent):
             
             # 检测提交信号
             if self._is_submit_signal(command):
-                logger.info("✅ TASK SUBMISSION DETECTED")
-                self._task_completed = True
+                if self._can_submit():
+                    logger.info("✅ TASK SUBMISSION DETECTED")
+                    self._task_completed = True
+                    return {
+                        "output": "✅ Task submission confirmed.",
+                        "returncode": 0
+                    }
+                logger.warning("🚫 SUBMISSION REJECTED: insufficient evidence")
                 return {
-                    "output": "✅ Task submission confirmed.", 
+                    "output": "Submission blocked: gather more code evidence (need >=1 viewed .py file and non-trivial progress).",
                     "returncode": 0
                 }
             
@@ -62,6 +68,21 @@ class BaseRepoQAAgent(DefaultAgent):
         
         env.execute = filtered_execute
         logger.info("✓ Filter installed successfully")
+
+    def _can_submit(self) -> bool:
+        """提交前门槛，降低过早提交噪声。"""
+        # 至少要读过一个 .py 文件
+        if len(self.viewed_files) < 1:
+            return False
+
+        # 若是 strategic agent，要求 subq 至少有进度或完成
+        if hasattr(self, "subq_manager") and getattr(self, "subq_manager") is not None:
+            subq = getattr(self, "subq_manager").sub_questions
+            if subq:
+                progressed = any(float(x.get("progress", 0.0)) >= 0.2 or x.get("status") == "satisfied" for x in subq)
+                return progressed
+
+        return True
     
     def _is_submit_signal(self, command: str) -> bool:
         """检测提交信号"""
@@ -198,6 +219,13 @@ class BaseRepoQAAgent(DefaultAgent):
             # ⚠️ 记录完整对话历史，用于后续复盘
             "history": self.messages 
         }
+
+        # 可选：保存子问题状态轨迹（供后续 RL 使用）
+        if hasattr(self, "subq_manager") and getattr(self, "subq_manager") is not None:
+            try:
+                data["subquestion_trace"] = self.subq_manager.snapshot()
+            except Exception:
+                pass
         
         with open(output_path / filename, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
