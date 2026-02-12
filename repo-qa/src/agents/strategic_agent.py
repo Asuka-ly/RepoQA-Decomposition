@@ -169,7 +169,12 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
             return
 
         action_l = (action or "").lower()
-        should_bootstrap = any(k in action_l for k in ["rg ", "grep", "cat ", "nl -ba", "sed -n", "ls", "find"])
+        # 避免“全库脚本化扫描”污染分解上下文：仅在轻量、可解释的检索动作上懒触发分解
+        broad_scan_markers = ["while ", "for ", "xargs", "&& find ", "|", ";"]
+        if any(m in action_l for m in broad_scan_markers):
+            return
+
+        should_bootstrap = any(k in action_l for k in ["rg ", "grep", "cat ", "nl -ba", "sed -n"])
         if should_bootstrap and step >= 0:
             task_hint = self.messages[1]["content"] if len(self.messages) > 1 else ""
             if self._run_decompose_tool(task_hint, step=step, reason="lazy_bootstrap"):
@@ -190,7 +195,12 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
 
         if "action" in obs_dict:
             step = max(0, (len(getattr(self, "messages", [])) - 2) // 2)
-            self._maybe_bootstrap_decompose_from_action(obs_dict.get("action", ""), step)
+            action = obs_dict.get("action", "")
+            self._maybe_bootstrap_decompose_from_action(action, step)
+
+            # 提交指令（含被拦截场景）不参与子问题推进与重规划计数，避免死循环噪声
+            if self._is_submit_signal(action):
+                return obs_dict
 
             graph_hint = ""
             if self._should_call_graph_tool(obs_dict.get("action", ""), step):

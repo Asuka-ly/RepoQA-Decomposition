@@ -48,6 +48,13 @@ class BaseRepoQAAgent(DefaultAgent):
 
             # 检测提交信号
             if self._is_submit_signal(command):
+                if not self._is_standalone_submit_command(command):
+                    logger.warning("🚫 SUBMISSION REJECTED: submit marker must be standalone")
+                    return {
+                        "output": "Submission blocked: run `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` as a standalone command.",
+                        "returncode": 0,
+                    }
+
                 if self._can_submit():
                     logger.info("✅ TASK SUBMISSION DETECTED")
                     self._task_completed = True
@@ -138,12 +145,24 @@ class BaseRepoQAAgent(DefaultAgent):
         return step_count >= 3
 
     def _is_submit_signal(self, command: str) -> bool:
-        """检测提交信号"""
+        """检测提交信号（允许命令中出现提交标记，但不代表可提交）。"""
         return (
             re.search(
                 r"echo\s+['\"]?COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT['\"]?",
                 command.strip(),
                 re.IGNORECASE,
+            )
+            is not None
+        )
+
+    def _is_standalone_submit_command(self, command: str) -> bool:
+        """提交命令必须独立执行，禁止与读代码命令串联。"""
+        cmd = (command or "").strip()
+        return (
+            re.fullmatch(
+                r"echo\s+['\"]?COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT['\"]?",
+                cmd,
+                flags=re.IGNORECASE,
             )
             is not None
         )

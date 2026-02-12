@@ -71,3 +71,10 @@ def test_can_submit_strategic_needs_satisfied_and_evidence():
         subq=subq,
     )
     assert agent._can_submit() is True
+
+
+def test_submit_command_must_be_standalone():
+    agent = _mk_agent(messages=[], viewed_files=set(), subq=None)
+    assert agent._is_submit_signal("cat a.py && echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT") is True
+    assert agent._is_standalone_submit_command("cat a.py && echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT") is False
+    assert agent._is_standalone_submit_command("echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT") is True

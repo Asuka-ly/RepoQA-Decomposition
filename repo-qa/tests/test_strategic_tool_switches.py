@@ -40,3 +40,19 @@ def test_lazy_decompose_bootstrap_calls_tool_once(monkeypatch):
     agent._run_decompose_tool = _fake
     agent._maybe_bootstrap_decompose_from_action("rg -n parse_action agents/default.py", step=0)
     assert called["n"] == 1
+
+
+def test_lazy_decompose_bootstrap_skips_broad_scan_script():
+    agent = _mk_agent(decompose_on_start=False, enable_decomposition_tool=True)
+    called = {"n": 0}
+
+    def _fake(task, step=0, reason=""):
+        called["n"] += 1
+        return True
+
+    agent._run_decompose_tool = _fake
+    agent._maybe_bootstrap_decompose_from_action(
+        "cd repo && find . -name '*.py' | while read -r f; do nl -ba $f; done",
+        step=0,
+    )
+    assert called["n"] == 0
