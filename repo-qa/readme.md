@@ -28,15 +28,8 @@
 轨迹质量检查：
 - `python scripts/analyze_trajectory.py --config baseline`
 
-批量测试（一次跑完 q1~q4）：
-- `python scripts/run_batch.py --mode ablation --all-questions`
-- `python scripts/run_batch.py --mode both --all-questions`
-
 离线冒烟实验（无外部 API）：
 - `python scripts/run_offline_smoke.py`
-
-完整在线测试手册（依赖安装/API 配置/批量测试/排查）：
-- `docs/stage1_online_test_playbook.md`
 
 ## 投稿计划
 - COLM 2025 (Deadline: 3.27)

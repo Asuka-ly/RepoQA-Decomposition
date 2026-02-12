@@ -55,23 +55,6 @@ HTTPS_PROXY=http://your-proxy
 
 ---
 
-
-## 2.1 Strategy/tool switches (YAML)
-
-You can now control decomposition/graph tool behavior from `configs/*.yaml`:
-
-- `enable_decomposition_tool`: turn decomposition tool on/off.
-- `decompose_on_start`: if `false`, decomposition is lazy/on-demand (triggered during execution).
-- `enable_dynamic_redecompose`: allow quality-triggered re-decompose.
-- `max_decompose_calls`: upper bound for decomposition tool calls.
-- `enable_graph_tools`: turn graph retrieve/validate tool calls on/off.
-- `enable_dynamic_graph_tool_calls`: if `true`, call graph tools based on action intent/stagnation.
-- `graph_tool_stagnation_steps`: threshold for stagnation-triggered graph tool calls.
-
-Recommended baseline for online tests: keep `enable_decomposition_tool=true` and set `decompose_on_start=false` to test dynamic tool usage.
-
----
-
 ## 3. 运行前自检
 
 ### 3.1 语法检查
