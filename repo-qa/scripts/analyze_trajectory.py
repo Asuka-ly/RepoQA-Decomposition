@@ -30,41 +30,16 @@ def analyze(data: Dict[str, Any]) -> Dict[str, Any]:
     trace = data.get("subquestion_trace", {})
     sub_questions = trace.get("sub_questions", [])
     replan_events = trace.get("replan_events", [])
-    quality_history = trace.get("quality_history", []) or []
 
-    decomp_action = data.get("decomposition_action", {})
-    decomp_quality = (decomp_action.get("quality") or {}) if isinstance(decomp_action, dict) else {}
-    decomp_meta = ((decomp_action.get("decomposition") or {}).get("action_metadata") or {}) if isinstance(decomp_action, dict) else {}
-
-    answer_refs = set(re.findall(r"\b[\w/.-]+\.py:\d+\b", answer))
-    trace_refs = set()
-    for sq in sub_questions:
-        for ref in sq.get("evidence_found", []) or []:
-            if isinstance(ref, str) and re.match(r"^[\w/.-]+\.py:(\d+|nl)$", ref):
-                trace_refs.add(ref)
-
-    evidence_refs = answer_refs | trace_refs
+    evidence_refs = re.findall(r"\b[\w/.-]+\.py:\d+\b", answer)
     has_final_answer = isinstance(answer, str) and len(answer.strip()) > 0 and not answer.startswith("ERROR:")
 
     satisfied = sum(1 for sq in sub_questions if sq.get("status") == "satisfied")
     blocked = sum(1 for sq in sub_questions if sq.get("status") == "blocked")
 
-    # 后验质量：执行过程统计
-    total_subq = len(sub_questions)
-    completion_rate = round((satisfied / total_subq), 4) if total_subq else 0.0
-    evidence_yield = round((len(trace_refs) / max(1, total_subq)), 4) if total_subq else 0.0
-
-    answer_lower = answer.lower()
-    align_hits = 0
-    for sq in sub_questions:
-        symbols = [s.lower() for s in sq.get("symbols", []) if isinstance(s, str)]
-        if symbols and any(sym in answer_lower for sym in symbols):
-            align_hits += 1
-    answer_alignment = round((align_hits / total_subq), 4) if total_subq else 0.0
-
     quality_flags = {
         "missing_final_answer": not has_final_answer,
-        "missing_evidence_refs": len(evidence_refs) == 0,
+        "missing_evidence_refs": len(set(evidence_refs)) == 0,
         "no_code_reads": (stats.get("viewed_files", 0) or 0) == 0,
     }
 
@@ -73,19 +48,11 @@ def analyze(data: Dict[str, Any]) -> Dict[str, Any]:
         "viewed_files": stats.get("viewed_files", 0),
         "has_final_answer": has_final_answer,
         "answer_length": len(answer),
-        "evidence_ref_count": len(evidence_refs),
-        "sub_questions_total": total_subq,
+        "evidence_ref_count": len(set(evidence_refs)),
+        "sub_questions_total": len(sub_questions),
         "sub_questions_satisfied": satisfied,
         "sub_questions_blocked": blocked,
         "replan_events": len(replan_events),
-        "decomposition_quality": decomp_quality.get("overall", None),
-        "decomposition_contract_version": decomp_meta.get("contract_version", None),
-        "posterior_quality": {
-            "evidence_yield": evidence_yield,
-            "completion_rate": completion_rate,
-            "answer_alignment": answer_alignment,
-            "latest_live_quality": quality_history[-1]["score"] if quality_history else None,
-        },
         "quality_flags": quality_flags,
     }
 

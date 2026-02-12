@@ -21,14 +21,9 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
         self.code_graph = None
         self.decomposer = None
         self.injector = None
-        self.graph_tools = None
-        self.graph_tool_calls = 0
-
         self.subq_manager = SubQuestionManager()
         self.decomposition = None
-        self.decomposition_quality = None
-        self.decomposition_workflow_trace = []
-
+    
     def run(self, task: str, repo_path: str = None):
         self.start_time = datetime.now()
 
@@ -43,15 +38,10 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
         # 2. 分解问题（Stage1 v2: 独立 Action）
         self.graph_tools = GraphTools(self.code_graph)
         self.decomposer = StrategicDecomposer(self.model, self.code_graph)
-        decompose_action = DecompositionAction(self.decomposer)
-        action_result = decompose_action.execute(task)
-
-        decomposition = action_result.decomposition
+        decomposition = self.decomposer.decompose(task)
         self.decomposition = decomposition
-        self.decomposition_quality = action_result.quality
-        self.decomposition_workflow_trace = action_result.workflow_trace
         self.subq_manager.initialize(decomposition)
-
+        
         # 3. 构造增强任务
         enhanced_task = build_task_prompt(task, repo_path, decomposition, self.exp_config)
 
@@ -74,36 +64,17 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
             obs_dict["output"] = obs_dict["observation"]
 
         if "action" in obs_dict:
+            # 用于 RL 的在线状态更新
             step = max(0, (len(getattr(self, "messages", [])) - 2) // 2)
-
-            graph_hint = ""
-            if self.graph_tools and self.subq_manager.sub_questions:
-                open_subq = [sq for sq in self.subq_manager.sub_questions if sq.get("status") != "satisfied"]
-                symbols = []
-                for sq in open_subq[:2]:
-                    symbols.extend([s for s in sq.get("symbols", []) if isinstance(s, str)])
-                symbols = list(dict.fromkeys(symbols))[:5]
-                if symbols:
-                    retrieve = self.graph_tools.graph_retrieve(symbols)
-                    validate = self.graph_tools.graph_validate(open_subq[:3])
-                    self.graph_tool_calls += 1
-                    graph_hint = (
-                        f"[GRAPH TOOL] grounded={retrieve.get('grounded', 0)} "
-                        f"coverage={validate.get('grounding_coverage', 0.0)} "
-                        f"exec={validate.get('executable_entry_rate', 0.0)}"
-                    )
-                    obs_dict["observation"] += "\n" + graph_hint
-                    obs_dict["output"] = obs_dict["observation"]
-
             self.subq_manager.update(
                 step=step,
                 action=obs_dict.get("action", ""),
                 observation=obs_dict.get("observation", ""),
-                graph_hint=graph_hint,
+                graph_hint=obs_dict.get("observation", ""),
             )
             if self.subq_manager.check_replan_needed(step):
                 obs_dict["observation"] += (
-                    "\n\n⚠️ [REPLAN SIGNAL] Quality indicates replanning is needed. "
+                    "\n\n⚠️ [REPLAN SIGNAL] Some sub-questions are blocked. "
                     "Refocus on unresolved symbols or switch entry candidates."
                 )
                 obs_dict["output"] = obs_dict["observation"]
@@ -113,17 +84,11 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
     def _get_stats(self) -> dict:
         stats = super()._get_stats()
         if self.injector:
-            stats["total_injections"] = self.injector.injection_count
-        stats["graph_tool_calls"] = self.graph_tool_calls
-
+            stats['total_injections'] = self.injector.injection_count
         if self.subq_manager.sub_questions:
-            stats["sub_questions_total"] = len(self.subq_manager.sub_questions)
-            stats["sub_questions_satisfied"] = sum(
-                1 for sq in self.subq_manager.sub_questions if sq.get("status") == "satisfied"
+            stats['sub_questions_total'] = len(self.subq_manager.sub_questions)
+            stats['sub_questions_satisfied'] = sum(
+                1 for sq in self.subq_manager.sub_questions if sq.get('status') == 'satisfied'
             )
-            stats["replan_events"] = len(self.subq_manager.replan_events)
-
-        if self.decomposition_quality:
-            stats["decomposition_quality"] = self.decomposition_quality.get("overall", 0.0)
-
+            stats['replan_events'] = len(self.subq_manager.replan_events)
         return stats
