@@ -1,17 +1,26 @@
-# === 模型配置 ===
+# === Model ===
 model_name: "gpt-5-mini"
 model_api_base: null
 
-# === 核心开关 ===
-enable_graph: true  # 构建图但不注入
-enable_graph_injection: false  # 关键：不注入
+# === Core switches ===
+enable_graph: true
+enable_graph_injection: false
 enable_command_filter: true
 enable_pattern_detection: false
 
-# === 参数 ===
+# === Tool orchestration ===
+enable_decomposition_tool: true
+decompose_on_start: false
+enable_dynamic_redecompose: true
+max_decompose_calls: 2
+enable_graph_tools: false
+enable_dynamic_graph_tool_calls: false
+graph_tool_stagnation_steps: 99
+
+# === Params ===
 injection_min_length: 6
 max_steps: 50
 
-# === 元信息 ===
+# === Metadata ===
 name: "no_graph"
-description: "消融：有分解但无图注入"
+description: "Ablation: decomposition enabled, graph tools disabled"
