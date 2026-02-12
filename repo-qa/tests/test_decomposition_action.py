@@ -41,6 +41,7 @@ def test_decomposition_action_attach_metadata_and_quality():
     assert result.decomposition["action_metadata"]["action_name"] == "DECOMPOSE_WITH_GRAPH"
     assert result.decomposition["action_metadata"]["contract_version"] == CONTRACT_VERSION
     assert result.workflow_trace[0]["step"] == "decompose"
+    assert "penalties" in result.quality
 
 
 def test_decomposition_action_quality_zero_on_empty_subq():

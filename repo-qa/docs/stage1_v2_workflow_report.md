@@ -30,7 +30,7 @@
 - `decomposition.action_metadata`
   - `action_name=DECOMPOSE_WITH_GRAPH`
   - `quality`
-  - `contract_version=stage1_v2.1`
+  - `contract_version=stage1_v2.2`
   - `required_subq_fields`
 - `plan_order`
 - `evidence_requirements`
@@ -81,15 +81,21 @@
 
 `DecompositionAction._estimate_quality()`：
 - prior: graph_grounding_coverage / entry_executability / subq_uniqueness
+- penalties: duplicate_subq_penalty / generic_entry_penalty
 - posterior: evidence_yield / completion_rate / answer_alignment（运行后更新）
-- overall（先验聚合）
+- overall（先验-惩罚聚合）
 
 ## 5. 已知限制
 - 质量评估目前是启发式分数，不是学习得到。
 - replan 仍主要依赖 blocked 子问题事件。
 - graph 仍以注入/检索辅助为主，尚未完全工具化（下一步）。
 
-## 6. 下一步（Stage1 继续）
+## 6. 图工具层（mock-first）
+
+- `GRAPH_RETRIEVE(symbols)`：返回候选节点与 grounded 数。
+- `GRAPH_VALIDATE(sub_questions)`：返回 grounding coverage 与 entry executability。
+
+## 7. 下一步（Stage1 继续）
 
 - 将 graph 能力扩展为显式工具调用（检索/验证）。
 - 把 replan 触发从 blocked 扩展到“低证据增量”场景。

@@ -32,12 +32,13 @@ python scripts/analyze_trajectory.py --config vanilla
 ## 3. 关键输出解释
 
 - `statistics.decomposition_quality`：分解先验质量（0~1）。
-- `decomposition_action.decomposition.action_metadata.contract_version`：分解契约版本（当前 stage1_v2.1）。
+- `decomposition_action.decomposition.action_metadata.contract_version`：分解契约版本（当前 stage1_v2.2）。
 - `decomposition_action.quality`：质量明细（prior + posterior 占位）。
 - `decomposition_action.decomposition.plan_order`：子问题执行顺序。
 - `decomposition_action.decomposition.evidence_requirements`：每个子问题证据要求。
 - `decomposition_action.decomposition.replan_triggers`：建议重规划触发器。
 - `subquestion_trace`：在线状态更新和重规划事件。
+- `statistics.graph_tool_calls`：图工具调用次数（用于评估图融合深度）。
 - `quality_flags.missing_evidence_refs`：答案与轨迹证据都不足时为 true。
 
 ## 4. 协作分工建议

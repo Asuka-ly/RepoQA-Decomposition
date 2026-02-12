@@ -11,7 +11,7 @@ from src.decomposer import StrategicDecomposer
 from src.graph_tools import GraphTools
 
 
-CONTRACT_VERSION = "stage1_v2.1"
+CONTRACT_VERSION = "stage1_v2.2"
 REQUIRED_SUBQ_FIELDS = [
     "id",
     "sub_question",
@@ -126,6 +126,10 @@ class DecompositionAction:
                     "entry_executability": 0.0,
                     "subq_uniqueness": 0.0,
                 },
+                "penalties": {
+                    "duplicate_subq_penalty": 0.0,
+                    "generic_entry_penalty": 0.0,
+                },
                 "posterior": {
                     "evidence_yield": 0.0,
                     "completion_rate": 0.0,
@@ -138,24 +142,42 @@ class DecompositionAction:
 
         unique_questions = {x.get("sub_question", "").strip().lower() for x in subq}
         uniqueness = len(unique_questions) / total
+        duplicate_penalty = round(1.0 - uniqueness, 4)
+
+        generic_entries = 0
+        total_entries = 0
+        for sq in subq:
+            for entry in sq.get("entry_candidates", []):
+                if not isinstance(entry, str):
+                    continue
+                total_entries += 1
+                if entry.strip().lower() in {"unknown", "unknown.py::unknown", "unknown::unknown"}:
+                    generic_entries += 1
+        generic_entry_penalty = round((generic_entries / total_entries), 4) if total_entries else 1.0
 
         prior = {
             "graph_grounding_coverage": validation.get("grounding_coverage", 0.0),
             "entry_executability": validation.get("executable_entry_rate", 0.0),
             "subq_uniqueness": round(uniqueness, 4),
         }
+        penalties = {
+            "duplicate_subq_penalty": duplicate_penalty,
+            "generic_entry_penalty": generic_entry_penalty,
+        }
 
-        # Stage1 先验阶段先占主导，后验在运行后由 analyzer/manager 更新
-        overall = round(
+        # explainable weighted score
+        prior_base = (
             0.45 * prior["graph_grounding_coverage"]
             + 0.35 * prior["entry_executability"]
-            + 0.20 * prior["subq_uniqueness"],
-            4,
+            + 0.20 * prior["subq_uniqueness"]
         )
+        penalty = 0.15 * penalties["duplicate_subq_penalty"] + 0.15 * penalties["generic_entry_penalty"]
+        overall = round(max(0.0, prior_base - penalty), 4)
 
         return {
             "overall": overall,
             "prior": prior,
+            "penalties": penalties,
             "posterior": {
                 "evidence_yield": 0.0,
                 "completion_rate": 0.0,

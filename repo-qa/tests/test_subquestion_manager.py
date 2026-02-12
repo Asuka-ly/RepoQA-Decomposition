@@ -155,3 +155,11 @@ def test_replan_trigger_on_no_new_evidence_steps():
 
     assert manager.check_replan_needed(step=4)
     assert any("no_new_evidence_for_3_steps" in e.get("reasons", []) for e in manager.replan_events)
+
+
+def test_replan_trigger_on_quality_drop():
+    manager = SubQuestionManager()
+    manager.initialize({"sub_questions": [{"id": "SQ1", "priority": 1, "progress": 0.8, "status": "in_progress", "attempts": 1, "symbols": [], "required_evidence": []}]})
+    manager.quality_history = [{"step": 1, "score": 0.8}, {"step": 2, "score": 0.5}]
+    assert manager.check_replan_needed(step=2)
+    assert any("decomposition_quality_drop" in e.get("reasons", []) for e in manager.replan_events)
