@@ -147,6 +147,7 @@
 - 子问题状态信号增强：
   - transition.signal 从“统一 action 字符串”升级为“每个 subq 的命中明细”；
   - 包含 `symbol_hits` / `required_hits` / `entry_hits` / `hit_score`，便于解释为何同一步中各子问题进度不同。
+<<<<<<< codex/analyze-current-progress-and-required-changes-o51zm5
 
 ## 13. 稳定性回归结果（重构前锁稳）
 
@@ -169,3 +170,5 @@
   - 对 `while/for/xargs/pipe/find` 等“全库脚本扫描”动作不触发懒分解，降低上下文语义污染风险。
 - 重规划死循环抑制：
   - 提交动作（包括被拒绝提交）不再参与子问题进度更新与重规划计数，避免“提交失败 -> 无进展 -> 重分解”回路。
+=======
+>>>>>>> main
