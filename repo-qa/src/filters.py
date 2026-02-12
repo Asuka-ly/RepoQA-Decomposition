@@ -19,7 +19,7 @@ class CommandFilter:
         
         # 执行类命令
         (r'\bsleep\s+\d', "Sleep is for testing, not analyzing"),
-        (r'\bpython\s+-c\b', "Direct code execution is forbidden"),
+        (r'\bpython\s+-c\b', "Direct code execute/execution is forbidden"),
         (r'\bpython\s+\w+\.py', "Script execution is forbidden"),
         (r'\bpip\s+install', "Installing packages is forbidden"),
         
