@@ -1,5 +1,20 @@
 # Stage1 v2.0 交接文档（面向协作开发与实验复现）
 
+## 0. 环境与测试（补全）
+
+> 你提到的缺口（依赖下载/API 配置/测试命令）已补齐到独立操作手册：`docs/stage1_online_test_playbook.md`。
+
+快速入口：
+
+```bash
+cd repo-qa
+bash setup.sh --yes
+pip install -r requirements.txt
+# 配置 .env: OPENAI_API_KEY / OPENAI_API_BASE
+python scripts/run_batch.py --mode ablation --all-questions
+```
+
+
 ## 1. 给协作者（如 pwh）的快速入口
 
 ### 代码入口
