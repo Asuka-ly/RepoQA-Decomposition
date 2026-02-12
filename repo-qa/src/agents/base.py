@@ -240,6 +240,7 @@ class BaseRepoQAAgent(DefaultAgent):
         filename = f"{timestamp}_full_log.json"
 
         data = {
+            "trajectory_schema_version": "stage1_v2.3",
             "metadata": {
                 "config": self.exp_config.to_dict(),
                 "timestamp": timestamp,
