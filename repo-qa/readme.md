@@ -10,10 +10,34 @@
 
 ## 快速开始
 1. 运行配置脚本：`bash setup.sh`
+   - 非交互模式：`bash setup.sh --yes`
+   - 从指定密钥文件加载：`bash setup.sh --yes --env-file /path/to/secure.env`
 2. 安装依赖：`pip install -r requirements.txt`
 3. 配置 API：编辑 `.env` 文件。
 4. 运行单次测试：`python scripts/run_single.py`
 5. 运行消融实验：`python scripts/run_ablation.py`
+
+可选网络参数（若环境必须走代理）：
+- `python scripts/run_single.py --keep-proxy`
+- `python scripts/run_ablation.py --keep-proxy`
+
+离线模式（不调用外部 API）：
+- `python scripts/run_single.py --offline --question-file q3_default_agent_action_flow.txt`
+- `python scripts/run_ablation.py --offline --question-file q4_message_history_flow.txt`
+
+轨迹质量检查：
+- `python scripts/analyze_trajectory.py --config baseline`
+- trajectory 会记录 `trajectory_schema_version` 与 `tool_calls`（工具调用轨迹）
+
+批量测试（一次跑完 q1~q4）：
+- `python scripts/run_batch.py --mode ablation --all-questions`
+- `python scripts/run_batch.py --mode both --all-questions`
+
+离线冒烟实验（无外部 API）：
+- `python scripts/run_offline_smoke.py`
+
+完整在线测试手册（依赖安装/API 配置/批量测试/排查）：
+- `docs/stage1_online_test_playbook.md`
 
 ## 投稿计划
 - COLM 2025 (Deadline: 3.27)

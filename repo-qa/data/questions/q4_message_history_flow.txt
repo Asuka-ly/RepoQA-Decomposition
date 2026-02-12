@@ -1,0 +1,3 @@
+How are messages appended across the DefaultAgent run loop (system/user/assistant order), and where are observations inserted? Provide exact file:line references.
+
+⚠️ Start from the mini-swe-agent source tree.
