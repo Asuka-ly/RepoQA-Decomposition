@@ -25,11 +25,10 @@ python scripts/run_batch.py --mode ablation --all-questions
 - 提交门槛：`src/agents/base.py`
 - 轨迹分析：`scripts/analyze_trajectory.py`
 
-### 核心新增（v2.x）
+### 核心新增（v2.0）
 - 独立分解 Action `DECOMPOSE_WITH_GRAPH`。
 - 分解质量分 `decomposition_quality`。
 - 轨迹新增 `decomposition_action` 字段。
-- P0/P1：新增 `ToolRegistry` 与 `tool_calls`（trajectory schema v2 最小版）。
 
 ## 2. 如何跑实验（最小命令）
 
@@ -54,7 +53,6 @@ python scripts/analyze_trajectory.py --config vanilla
 - `decomposition_action.decomposition.evidence_requirements`：每个子问题证据要求。
 - `decomposition_action.decomposition.replan_triggers`：建议重规划触发器。
 - `subquestion_trace`：在线状态更新和重规划事件。
-- `tool_calls`：统一工具调用明细（name/reason/success/latency）。
 - `statistics.graph_tool_calls`：图工具调用次数（用于评估图融合深度）。
 - `quality_flags.missing_evidence_refs`：答案与轨迹证据都不足时为 true。
 

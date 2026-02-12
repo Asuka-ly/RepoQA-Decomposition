@@ -33,7 +33,7 @@ def test_lazy_decompose_bootstrap_calls_tool_once(monkeypatch):
     agent = _mk_agent(decompose_on_start=False, enable_decomposition_tool=True)
     called = {"n": 0}
 
-    def _fake(task, step=0, reason=""):
+    def _fake(task):
         called["n"] += 1
         return True
 

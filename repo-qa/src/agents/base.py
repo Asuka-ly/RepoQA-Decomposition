@@ -53,12 +53,12 @@ class BaseRepoQAAgent(DefaultAgent):
                     self._task_completed = True
                     return {
                         "output": "✅ Task submission confirmed.",
-                        "returncode": 0,
+                        "returncode": 0
                     }
                 logger.warning("🚫 SUBMISSION REJECTED: insufficient evidence")
                 return {
-                    "output": "Submission blocked: need traceable code evidence and stronger progress before final submission.",
-                    "returncode": 0,
+                    "output": "Submission blocked: gather more code evidence (need >=1 viewed .py file and non-trivial progress).",
+                    "returncode": 0
                 }
 
             # 命令过滤
@@ -73,57 +73,21 @@ class BaseRepoQAAgent(DefaultAgent):
         env.execute = filtered_execute
         logger.info("✓ Filter installed successfully")
 
-    def _extract_evidence_refs(self, text: str) -> set[str]:
-        """提取 file.py:line 或 file.py:nl 形式证据。"""
-        refs = set(re.findall(r"\b[\w/.-]+\.py:(?:\d+|nl)\b", text or ""))
-        return refs
-
-    def _collected_evidence_count(self) -> int:
-        """基于历史 observation 统计已收集的证据引用数量。"""
-        refs = set()
-        for msg in getattr(self, "messages", []):
-            if msg.get("role") in {"user", "assistant"}:
-                refs.update(self._extract_evidence_refs(msg.get("content", "")))
-        return len(refs)
-
     def _can_submit(self) -> bool:
-        """提交前门槛：避免过早提交，要求有覆盖度与可追溯证据。"""
-        step_count = max(0, (len(getattr(self, "messages", [])) - 2) // 2)
-        manager = getattr(self, "subq_manager", None)
-
-        total_subq = len(getattr(manager, "sub_questions", []) or []) if manager is not None else 0
-        collected_evidence = self._collected_evidence_count()
-
-        # strategic 模式下按子问题规模设置最小浏览文件数；vanilla 至少读 1 个 .py
-        min_viewed = 2 if total_subq >= 3 else 1
-        if len(self.viewed_files) < min_viewed:
+        """提交前门槛，降低过早提交噪声。"""
+        # 至少要读过一个 .py 文件
+        if len(self.viewed_files) < 1:
             return False
 
-        # strategic 模式下，至少完成一半子问题（且多子问题时至少 2 个），并有证据引用
-        if manager is not None and getattr(manager, "sub_questions", None):
-            subq = manager.sub_questions
-            total = len(subq)
-            satisfied = sum(1 for x in subq if x.get("status") == "satisfied")
-            progressed = sum(1 for x in subq if float(x.get("progress", 0.0)) >= 0.6)
-            evidence_refs = sum(len(x.get("evidence_found", [])) for x in subq)
+        # 若是 strategic agent，要求 subq 至少有进度或完成
+        if hasattr(self, "subq_manager") and getattr(self, "subq_manager") is not None:
+            subq = getattr(self, "subq_manager").sub_questions
+            if subq:
+                progressed = any(float(x.get("progress", 0.0)) >= 0.2 or x.get("status") == "satisfied" for x in subq)
+                return progressed
 
-            min_satisfied = 1 if total <= 2 else max(2, (total + 1) // 2)
-            if satisfied < min_satisfied:
-                return False
-            if evidence_refs < min_satisfied:
-                return False
-            if collected_evidence < min_satisfied:
-                return False
-            if satisfied + progressed < min(total, min_satisfied + 1):
-                return False
-
-            return step_count >= 3
-
-        # vanilla 模式：仍要求至少有一条可追溯证据，减少“长篇空答”提交
-        if collected_evidence < 1:
-            return False
-        return step_count >= 3
-
+        return True
+    
     def _is_submit_signal(self, command: str) -> bool:
         """检测提交信号"""
         return (
@@ -287,27 +251,14 @@ class BaseRepoQAAgent(DefaultAgent):
             "history": self.messages,
         }
 
-        if hasattr(self, "decomposition") and getattr(self, "decomposition") is not None:
-            data["decomposition_action"] = {
-                "decomposition": self.decomposition,
-                "quality": getattr(self, "decomposition_quality", None),
-                "workflow_trace": getattr(self, "decomposition_workflow_trace", []),
-            }
-
+        # 可选：保存子问题状态轨迹（供后续 RL 使用）
         if hasattr(self, "subq_manager") and getattr(self, "subq_manager") is not None:
             try:
                 data["subquestion_trace"] = self.subq_manager.snapshot()
             except Exception:
                 pass
-
-        # P0/P1：写入统一工具调用轨迹（若可用）
-        if hasattr(self, "tool_registry") and getattr(self, "tool_registry", None) is not None:
-            try:
-                data["tool_calls"] = self.tool_registry.get_calls()
-            except Exception:
-                pass
-
-        with open(output_path / filename, "w", encoding="utf-8") as f:
+        
+        with open(output_path / filename, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
-
+        
         logger.info(f"💾 Full trajectory saved to: {output_path / filename}")
