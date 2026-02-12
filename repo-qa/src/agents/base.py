@@ -53,12 +53,12 @@ class BaseRepoQAAgent(DefaultAgent):
                     self._task_completed = True
                     return {
                         "output": "✅ Task submission confirmed.",
-                        "returncode": 0
+                        "returncode": 0,
                     }
                 logger.warning("🚫 SUBMISSION REJECTED: insufficient evidence")
                 return {
-                    "output": "Submission blocked: gather more code evidence (need >=1 viewed .py file and non-trivial progress).",
-                    "returncode": 0
+                    "output": "Submission blocked: need traceable code evidence and stronger progress before final submission.",
+                    "returncode": 0,
                 }
 
             # 命令过滤
@@ -73,21 +73,70 @@ class BaseRepoQAAgent(DefaultAgent):
         env.execute = filtered_execute
         logger.info("✓ Filter installed successfully")
 
+    def _extract_evidence_refs(self, text: str) -> set[str]:
+        """提取 file.py:line 或 file.py:nl 形式证据。"""
+        refs = set(re.findall(r"\b[\w/.-]+\.py:(?:\d+|nl)\b", text or ""))
+        return refs
+
+    def _collected_evidence_count(self) -> int:
+        """基于历史 observation 统计已收集的证据引用数量。"""
+        refs = set()
+        for msg in getattr(self, "messages", []):
+            if msg.get("role") in {"user", "assistant"}:
+                refs.update(self._extract_evidence_refs(msg.get("content", "")))
+        return len(refs)
+
+    def _assistant_evidence_count(self) -> int:
+        """仅统计 assistant 消息中的证据引用数（更严格的提交约束）。"""
+        refs = set()
+        for msg in getattr(self, "messages", []):
+            if msg.get("role") == "assistant":
+                refs.update(self._extract_evidence_refs(msg.get("content", "")))
+        return len(refs)
+
     def _can_submit(self) -> bool:
-        """提交前门槛，降低过早提交噪声。"""
-        # 至少要读过一个 .py 文件
-        if len(self.viewed_files) < 1:
+        """提交前门槛：避免过早提交，要求有覆盖度与可追溯证据。"""
+        step_count = max(0, (len(getattr(self, "messages", [])) - 2) // 2)
+        manager = getattr(self, "subq_manager", None)
+
+        total_subq = len(getattr(manager, "sub_questions", []) or []) if manager is not None else 0
+        collected_evidence = self._collected_evidence_count()
+        assistant_evidence = self._assistant_evidence_count()
+
+        # strategic 模式下按子问题规模设置最小浏览文件数；vanilla 至少读 1 个 .py
+        min_viewed = 2 if total_subq >= 3 else 1
+        if len(self.viewed_files) < min_viewed:
             return False
 
-        # 若是 strategic agent，要求 subq 至少有进度或完成
-        if hasattr(self, "subq_manager") and getattr(self, "subq_manager") is not None:
-            subq = getattr(self, "subq_manager").sub_questions
-            if subq:
-                progressed = any(float(x.get("progress", 0.0)) >= 0.2 or x.get("status") == "satisfied" for x in subq)
-                return progressed
+        # strategic 模式下，至少完成一半子问题（且多子问题时至少 2 个），并有证据引用
+        if manager is not None and getattr(manager, "sub_questions", None):
+            subq = manager.sub_questions
+            total = len(subq)
+            satisfied = sum(1 for x in subq if x.get("status") == "satisfied")
+            progressed = sum(1 for x in subq if float(x.get("progress", 0.0)) >= 0.6)
+            evidence_refs = sum(len(x.get("evidence_found", [])) for x in subq)
 
-        return True
-    
+            min_satisfied = 1 if total <= 2 else max(2, (total + 1) // 2)
+            if satisfied < min_satisfied:
+                return False
+            if evidence_refs < min_satisfied:
+                return False
+            if collected_evidence < min_satisfied:
+                return False
+            if assistant_evidence < min_satisfied:
+                return False
+            if satisfied + progressed < min(total, min_satisfied + 1):
+                return False
+
+            return step_count >= 3
+
+        # vanilla 模式：仍要求至少有一条可追溯证据，减少“长篇空答”提交
+        if collected_evidence < 1:
+            return False
+        if assistant_evidence < 1:
+            return False
+        return step_count >= 3
+
     def _is_submit_signal(self, command: str) -> bool:
         """检测提交信号"""
         return (
@@ -108,12 +157,10 @@ class BaseRepoQAAgent(DefaultAgent):
         obs_dict["observation"] = raw_output
 
         step = max(0, (len(getattr(self, "messages", [])) - 2) // 2)
-        logger.info("=" * 60)
-        logger.info(f"📍 STEP {step} | Observation")
-        logger.info(f"  action: {obs_dict.get('action', 'N/A')}")
-        logger.info(f"  output: {raw_output[:180].replace(chr(10), ' ')}")
-        logger.info(f"  returncode: {obs_dict.get('returncode', 'N/A')}")
-        logger.info("=" * 60)
+        action_preview = (obs_dict.get("action", "N/A") or "N/A")[:88]
+        output_preview = (raw_output or "").replace(chr(10), " ")[:140]
+        logger.info(f"📍S{step:02d} | rc={obs_dict.get('returncode', 'N/A')} | action={action_preview}")
+        logger.info(f"   ↳ {output_preview}")
 
         # 使用父类的异常机制终止
         if self._task_completed:
@@ -156,6 +203,29 @@ class BaseRepoQAAgent(DefaultAgent):
         lines.append("[NOTE] This answer was synthesized from history (typically at max steps or when FINAL ANSWER is missing).")
         return "\n".join(lines)
 
+    def _format_final_answer(self, answer: str) -> str:
+        """把模型答案统一成“回答 + 详细分析”格式。"""
+        clean = (answer or "").strip()
+        if not clean:
+            return clean
+
+        # 清理常见尾句，避免把“提交动作说明”混入最终答案
+        clean = re.sub(r"\bI will now submit.*$", "", clean, flags=re.IGNORECASE | re.DOTALL).strip()
+
+        # 若已是标准结构，直接返回
+        if "Answer:" in clean and "Detailed analysis:" in clean:
+            return clean
+
+        # 自动提取简答：取第一段前 220 字
+        first_para = clean.split("\n\n", 1)[0].strip()
+        if len(first_para) > 220:
+            first_para = first_para[:220].rsplit(" ", 1)[0] + "..."
+
+        return (
+            f"Answer:\n{first_para}\n\n"
+            f"Detailed analysis:\n{clean}"
+        )
+
     def _extract_final_answer(self) -> str:
         """优先提取 FINAL ANSWER；失败时从历史自动汇总。"""
         if not hasattr(self, "messages"):
@@ -174,16 +244,16 @@ class BaseRepoQAAgent(DefaultAgent):
                 answer = match.group(1).strip()
                 answer = re.sub(r"```bash.*?```", "", answer, flags=re.DOTALL).strip()
                 if len(answer) > 20:
-                    return answer
+                    return self._format_final_answer(answer)
 
             if "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" in content and len(content) > 100:
                 answer = re.sub(r"```bash.*?```", "", content, flags=re.DOTALL).strip()
                 answer = re.sub(r"^(THOUGHT|Thought|REASONING):\s*", "", answer, flags=re.IGNORECASE).strip()
                 if len(answer) > 20:
-                    return answer
+                    return self._format_final_answer(answer)
 
         logger.warning("⚠️  No substantive answer found in Assistant messages; fallback to history synthesis.")
-        return self._build_summary_from_history()
+        return self._format_final_answer(self._build_summary_from_history())
 
     def _ensure_final_answer(self):
         """在异常终止/最大步数情况下，确保 final_answer 存在。"""
@@ -218,7 +288,8 @@ class BaseRepoQAAgent(DefaultAgent):
         if hasattr(self, "subq_manager") and getattr(self, "subq_manager", None) is not None:
             subq = getattr(self.subq_manager, "sub_questions", []) or []
             satisfied = sum(1 for x in subq if x.get("status") == "satisfied")
-            logger.info(f"  subq_progress: {satisfied}/{len(subq)} satisfied")
+            blocked = sum(1 for x in subq if x.get("status") == "blocked")
+            logger.info(f"  subq_progress: {satisfied}/{len(subq)} satisfied, blocked={blocked}")
 
         if self._final_answer:
             display_text = self._final_answer[:500] + "..." if len(self._final_answer) > 500 else self._final_answer
@@ -251,14 +322,27 @@ class BaseRepoQAAgent(DefaultAgent):
             "history": self.messages,
         }
 
-        # 可选：保存子问题状态轨迹（供后续 RL 使用）
+        if hasattr(self, "decomposition") and getattr(self, "decomposition") is not None:
+            data["decomposition_action"] = {
+                "decomposition": self.decomposition,
+                "quality": getattr(self, "decomposition_quality", None),
+                "workflow_trace": getattr(self, "decomposition_workflow_trace", []),
+            }
+
         if hasattr(self, "subq_manager") and getattr(self, "subq_manager") is not None:
             try:
                 data["subquestion_trace"] = self.subq_manager.snapshot()
             except Exception:
                 pass
-        
-        with open(output_path / filename, 'w', encoding='utf-8') as f:
+
+        # P0/P1：写入统一工具调用轨迹（若可用）
+        if hasattr(self, "tool_registry") and getattr(self, "tool_registry", None) is not None:
+            try:
+                data["tool_calls"] = self.tool_registry.get_calls()
+            except Exception:
+                pass
+
+        with open(output_path / filename, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
-        
+
         logger.info(f"💾 Full trajectory saved to: {output_path / filename}")

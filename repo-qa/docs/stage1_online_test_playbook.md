@@ -55,6 +55,23 @@ HTTPS_PROXY=http://your-proxy
 
 ---
 
+
+## 2.1 Strategy/tool switches (YAML)
+
+You can now control decomposition/graph tool behavior from `configs/*.yaml`:
+
+- `enable_decomposition_tool`: turn decomposition tool on/off.
+- `decompose_on_start`: if `false`, decomposition is lazy/on-demand (triggered during execution).
+- `enable_dynamic_redecompose`: allow quality-triggered re-decompose.
+- `max_decompose_calls`: upper bound for decomposition tool calls.
+- `enable_graph_tools`: turn graph retrieve/validate tool calls on/off.
+- `enable_dynamic_graph_tool_calls`: if `true`, call graph tools based on action intent/stagnation.
+- `graph_tool_stagnation_steps`: threshold for stagnation-triggered graph tool calls.
+
+Recommended baseline for online tests: keep `enable_decomposition_tool=true` and set `decompose_on_start=false` to test dynamic tool usage.
+
+---
+
 ## 3. 运行前自检
 
 ### 3.1 语法检查
@@ -83,7 +100,8 @@ pytest -q \
   tests/test_decomposer.py \
   tests/test_graph.py \
   tests/test_filters.py \
-  tests/test_run_batch.py
+  tests/test_run_batch.py \
+  tests/test_tool_registry.py
 ```
 
 ---
@@ -140,8 +158,10 @@ python scripts/analyze_trajectory.py --config vanilla
 ```
 
 关注指标：
+- `trajectory_schema_version`（应为 `stage1_v2.3`）
 - `decomposition_quality`
 - `decomposition_contract_version`
+- `tool_call_count` / `tool_call_counter`
 - `posterior_quality.evidence_yield`
 - `posterior_quality.completion_rate`
 - `quality_flags.missing_evidence_refs`

@@ -100,3 +100,50 @@
 - 将 graph 能力扩展为显式工具调用（检索/验证）。
 - 把 replan 触发从 blocked 扩展到“低证据增量”场景。
 - 增加 decomposition quality 与执行效果（evidence yield）的关联分析报表。
+
+
+## 8. 在线可视化与轨迹可读性改进（本次）
+
+- 终端日志从“长块输出”改为“按 step 的紧凑摘要”，优先显示 action、输出前缀、returncode，降低阅读疲劳。
+- 执行结束摘要额外输出 sub-question 满足率（`x/y satisfied`），减少在大段 history 中手工统计。
+- final answer 在缺失显式 `## FINAL ANSWER` 时自动从历史对话回填结构化总结，避免空答案轨迹。
+
+## 9. 动态工具调用策略（本次）
+
+- `DECOMPOSE_WITH_GRAPH` 从“仅初始化调用”升级为“可二次调用”：当出现质量下降/高优先级停滞/持续低证据时触发重分解（带频率限制）。
+- 图工具调用由“每步调用”改为“策略调用”：仅在检索型 action（`rg/grep/cat/nl/sed`）或证据连续停滞场景触发。
+- 新增统计：`decompose_tool_calls`，用于评估动态分解带来的额外成本与收益。
+
+## 10. 长期设计方向（年后重点）
+
+- 分解与图的联合目标函数：不仅看 grounding coverage，还要看“每次图调用对 evidence 增量的贡献”。
+- 将 `sub_question` 升级为“可执行查询计划单元”（含预期图路径、可验证断言、失败回退策略）。
+- 形成 failure taxonomy：分解失败（plan 错）、检索失败（tool 用法错）、综合失败（答案覆盖不全），为后续 RL reward shaping 准备标签。
+
+
+## 11. P0/P1 本轮落地（工具注册 + 轨迹 schema v2）
+
+- 新增 `ToolRegistry`（`src/tool_registry.py`）：
+  - 统一记录工具调用（tool_name / reason / success / latency / input_summary / output_summary）。
+  - 当前接入工具：`DECOMPOSE_WITH_GRAPH`、`GRAPH_RETRIEVE`、`GRAPH_VALIDATE`。
+- `StrategicRepoQAAgent` 接入 registry：
+  - 分解与图工具调用通过 registry 封装后执行；
+  - `statistics.tool_call_counters` 输出按工具聚合计数。
+- trajectory 升级到 schema v2 最小版：
+  - 新增 `trajectory_schema_version=stage1_v2.3`；
+  - 新增 `tool_calls` 列表（完整工具调用轨迹）。
+- 分析器升级：
+  - `scripts/analyze_trajectory.py` 新增 `tool_call_count` 与 `tool_call_counter`。
+
+
+## 12. 本轮修复（答案格式 + 终端可视化 + 子问题信号）
+
+- 最终答案格式标准化：
+  - 从“仅详细条目”改为 `Answer:` + `Detailed analysis:` 双段结构；
+  - 自动去除尾部提交口令描述（如 `I will now submit ...`），避免污染最终答案。
+- 终端可视化密度优化：
+  - 每步输出改为紧凑两行（`Sxx | rc | action` + `output preview`）；
+  - 在执行摘要中保留子问题中间状态统计（satisfied / blocked）。
+- 子问题状态信号增强：
+  - transition.signal 从“统一 action 字符串”升级为“每个 subq 的命中明细”；
+  - 包含 `symbol_hits` / `required_hits` / `entry_hits` / `hit_score`，便于解释为何同一步中各子问题进度不同。

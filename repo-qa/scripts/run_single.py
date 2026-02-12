@@ -55,16 +55,18 @@ def _offline_outputs(repo_path: str):
     )
     return [
         decomp_json,
-        f"Find DefaultAgent\n```bash\ncd {repo_path} && rg \"class DefaultAgent\" agents/default.py\n```",
-        f"Read parse_action\n```bash\ncd {repo_path} && nl -ba agents/default.py | sed -n '130,190p'\n```",
-        f"Read run\n```bash\ncd {repo_path} && nl -ba agents/default.py | sed -n '190,260p'\n```",
+        f'Find DefaultAgent\n```bash\ncd {repo_path} && rg "class DefaultAgent" agents/default.py\n```',
+        f'Find parse_action line\n```bash\ncd {repo_path} && rg -n "def parse_action" agents/default.py\n```',
+        f"Read parse_action with lines\n```bash\ncd {repo_path} && nl -ba agents/default.py | sed -n '120,180p'\n```",
+        f"Read run loop with lines\n```bash\ncd {repo_path} && nl -ba agents/default.py | sed -n '180,250p'\n```",
         (
             "## FINAL ANSWER\n"
-            "`DefaultAgent.parse_action` enforces one bash action at `src/minisweagent/agents/default.py:138`; "
-            "execution/observation loop appears near `src/minisweagent/agents/default.py:246`."
+            "`DefaultAgent.parse_action` is defined in `agents/default.py` and its line location is confirmed via `rg -n`; "
+            "the execution/observation handling is in `agents/default.py:131`, and parsing is in `agents/default.py:116`."
             "\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\n```"
         ),
     ]
+
 
 
 def main():
