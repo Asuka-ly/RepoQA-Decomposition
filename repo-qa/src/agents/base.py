@@ -68,6 +68,18 @@ class BaseRepoQAAgent(DefaultAgent):
                     "returncode": 0,
                 }
 
+            # 补偿方案 B：对“全库脚本扫描”做软拦截（带改写建议）
+            if self._should_soft_block_broad_scan(command):
+                logger.warning("🚫 BROAD SCAN SOFT-BLOCKED: command is too wide for current stage")
+                return {
+                    "output": (
+                        "Broad-scan command blocked for now. "
+                        "Use focused steps first: (1) rg symbol in candidate files, "
+                        "(2) nl/sed around matched lines, (3) submit only after evidence."
+                    ),
+                    "returncode": 0,
+                }
+
             # 命令过滤
             should_block, reason = self.cmd_filter.should_block(command)
             if should_block:
@@ -79,6 +91,32 @@ class BaseRepoQAAgent(DefaultAgent):
 
         env.execute = filtered_execute
         logger.info("✓ Filter installed successfully")
+
+    def _is_broad_scan_command(self, command: str) -> bool:
+        """识别高噪声全库脚本扫描命令（while/for/xargs/管道+find）。"""
+        cmd = (command or "").lower()
+        markers = ["while ", "for ", "xargs", "|", ";", "&& find ", "find .", "find ./"]
+        # 仅当同时出现“枚举文件 + 批处理”时判定为 broad-scan，降低误伤
+        has_enumeration = any(k in cmd for k in ["find ", "rg --files", "ls -r", "fd "])
+        has_batch = any(m in cmd for m in markers)
+        return has_enumeration and has_batch
+
+    def _should_soft_block_broad_scan(self, command: str) -> bool:
+        """补偿方案 A/B：早期预算内禁止宽扫描；证据停滞后允许升级。"""
+        if not getattr(self.exp_config, "enable_scan_compensation", True):
+            return False
+        if not self._is_broad_scan_command(command):
+            return False
+
+        step_count = max(0, (len(getattr(self, "messages", [])) - 2) // 2)
+        early_budget = int(getattr(self.exp_config, "early_exploration_budget_steps", 2))
+        allow_after = int(getattr(self.exp_config, "allow_broad_scan_after_stagnation", 3))
+
+        manager = getattr(self, "subq_manager", None)
+        stagnation = int(getattr(manager, "no_new_evidence_steps", 0)) if manager is not None else 0
+
+        # 预算期内默认拦截；若证据已明显停滞，则放行升级探索
+        return step_count <= early_budget and stagnation < allow_after
 
     def _extract_evidence_refs(self, text: str) -> set[str]:
         """提取 file.py:line 或 file.py:nl 形式证据。"""

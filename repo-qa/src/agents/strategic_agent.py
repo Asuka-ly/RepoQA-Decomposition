@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import re
 
 from src.agents.base import BaseRepoQAAgent
 from src.decomposer import StrategicDecomposer
@@ -180,6 +181,22 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
             if self._run_decompose_tool(task_hint, step=step, reason="lazy_bootstrap"):
                 logger.info("🧠 Lazy DECOMPOSE_WITH_GRAPH triggered from agent action.")
 
+    def _fallback_symbols_from_task(self, limit: int = 5) -> list[str]:
+        """补偿方案 C：当 subq 尚未初始化时，从问题文本抽取轻量 symbols 供图检索。"""
+        task = self.messages[1]["content"] if len(getattr(self, "messages", [])) > 1 else ""
+        cands = re.findall(r"\b[A-Z][a-zA-Z]{2,}\b|\b[a-z_]{4,}\b", task)
+        stop = {"with", "from", "that", "this", "what", "where", "when", "which", "about", "should"}
+        filtered = []
+        for c in cands:
+            cl = c.lower()
+            if cl in stop:
+                continue
+            if c not in filtered:
+                filtered.append(c)
+            if len(filtered) >= limit:
+                break
+        return filtered
+
     def get_observation(self, response: dict) -> dict:
         """处理 observation 并执行动态工具调用。
 
@@ -209,6 +226,8 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
                 for sq in open_subq[:2]:
                     symbols.extend([s for s in sq.get("symbols", []) if isinstance(s, str)])
                 symbols = list(dict.fromkeys(symbols))[:5]
+                if not symbols:
+                    symbols = self._fallback_symbols_from_task(limit=5)
                 if symbols:
                     retrieve = self.tool_registry.invoke(
                         step=step,

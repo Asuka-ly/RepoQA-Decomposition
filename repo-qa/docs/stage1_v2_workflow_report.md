@@ -169,3 +169,22 @@
   - 对 `while/for/xargs/pipe/find` 等“全库脚本扫描”动作不触发懒分解，降低上下文语义污染风险。
 - 重规划死循环抑制：
   - 提交动作（包括被拒绝提交）不再参与子问题进度更新与重规划计数，避免“提交失败 -> 无进展 -> 重分解”回路。
+
+
+## 15. 补偿方案落地（A/B/C）与分解质量指标升级
+
+- A（受控探索预算）：
+  - 新增配置 `enable_scan_compensation / early_exploration_budget_steps / allow_broad_scan_after_stagnation`；
+  - 在早期预算内默认阻断“全库脚本扫描”，仅在证据连续停滞后允许升级探索。
+- B（软拦截+改写引导）：
+  - 对宽扫描命令返回可执行的改写建议（先 `rg` 定位，再 `nl/sed` 取证），避免直接失败导致策略崩坏。
+- C（图工具补偿）：
+  - 当 sub-question 尚未初始化时，允许从任务文本抽取候选 symbols 触发 `GRAPH_RETRIEVE`，降低禁用宽扫描后的信息损失。
+
+- 分解质量评估升级（relation-aware）：
+  - 新增 `relation` 维度：
+    - `symbol_overlap`：子问题间符号交叉强度；
+    - `overlap_balance`：鼓励“有交叉但不过高”；
+    - `dependency_signal`：priority 分层 + entry 跨模块分布；
+    - `completeness_proxy`：required_evidence 覆盖与 unresolved_symbols 约束。
+  - 说明：当前仍是“可解释代理指标”，尚不能严格等价于“语义完备性真值”；后续需结合人工标注或任务级回报做校准。

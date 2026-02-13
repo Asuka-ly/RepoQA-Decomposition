@@ -16,6 +16,9 @@ max_decompose_calls: 2
 enable_graph_tools: false
 enable_dynamic_graph_tool_calls: false
 graph_tool_stagnation_steps: 99
+enable_scan_compensation: true
+early_exploration_budget_steps: 2
+allow_broad_scan_after_stagnation: 3
 
 # === Params ===
 injection_min_length: 6
