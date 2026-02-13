@@ -188,3 +188,16 @@
     - `dependency_signal`：priority 分层 + entry 跨模块分布；
     - `completeness_proxy`：required_evidence 覆盖与 unresolved_symbols 约束。
   - 说明：当前仍是“可解释代理指标”，尚不能严格等价于“语义完备性真值”；后续需结合人工标注或任务级回报做校准。
+
+
+## 16. 主动图调度四点落地（本轮）
+
+- ① 图调用前置（准前置）：
+  - 在每步 observation 后立即执行图检索/校验，并向下一步决策注入 `GRAPH NEXT ACTIONS` 模板；
+  - 实际效果是“在下一步动作生成前”给出图引导候选动作。
+- ② 图结果结构化为动作模板：
+  - 将 `GRAPH_RETRIEVE` 返回的 `file/line/symbol` 直接编译成 `rg` / `nl+sed` 命令建议，减少 LLM 自由度带来的偏航。
+- ③ 图作为宽扫描守门器：
+  - 当宽扫描被软拦截时，返回图引导改写建议（优先给出候选文件+行号附近读取模板），替代“直接拒绝不指导”。
+- ④ relation 指标接入重规划：
+  - 当 `overlap_balance/completeness_proxy` 明显失衡且证据停滞时，触发 relation 维度重分解信号（`relation_metric_imbalance`）。

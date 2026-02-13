@@ -72,11 +72,7 @@ class BaseRepoQAAgent(DefaultAgent):
             if self._should_soft_block_broad_scan(command):
                 logger.warning("🚫 BROAD SCAN SOFT-BLOCKED: command is too wide for current stage")
                 return {
-                    "output": (
-                        "Broad-scan command blocked for now. "
-                        "Use focused steps first: (1) rg symbol in candidate files, "
-                        "(2) nl/sed around matched lines, (3) submit only after evidence."
-                    ),
+                    "output": self._build_broad_scan_rewrite_hint(command),
                     "returncode": 0,
                 }
 
@@ -117,6 +113,53 @@ class BaseRepoQAAgent(DefaultAgent):
 
         # 预算期内默认拦截；若证据已明显停滞，则放行升级探索
         return step_count <= early_budget and stagnation < allow_after
+
+    def _build_broad_scan_rewrite_hint(self, command: str) -> str:
+        """补偿方案：把宽扫描重写为图引导的聚焦读取步骤。"""
+        hints = [
+            "Broad-scan command blocked for now.",
+            "Rewrite plan: (1) use GRAPH_RETRIEVE symbols, (2) rg on 1~3 files, (3) nl/sed around lines.",
+        ]
+
+        symbols = []
+        q = self.messages[1]["content"] if len(getattr(self, "messages", [])) > 1 else ""
+        symbols.extend(re.findall(r"\b[A-Z][a-zA-Z]{2,}\b|\b[a-z_]{4,}\b", q))
+        symbols = [x for i, x in enumerate(symbols) if x and x not in symbols[:i]][:3]
+
+        graph_tools = getattr(self, "graph_tools", None)
+        if graph_tools and symbols:
+            try:
+                retrieve = graph_tools.graph_retrieve(symbols)
+                results = retrieve.get("results", {}) if isinstance(retrieve, dict) else {}
+                templates = []
+                for sym, items in results.items():
+                    if not isinstance(items, list):
+                        continue
+                    for item in items[:1]:
+                        fp = item.get("file")
+                        ln = item.get("line")
+                        if not fp:
+                            continue
+                        templates.append(f"rg -n \"{sym}\" {fp}")
+                        if ln:
+                            templates.append(f"nl -ba {fp} | sed -n '{max(1, int(ln)-20)},{int(ln)+40}p'")
+                        if len(templates) >= 3:
+                            break
+                    if len(templates) >= 3:
+                        break
+                if templates:
+                    hints.append("Suggested commands:")
+                    hints.extend([f"- {t}" for t in templates])
+            except Exception:
+                pass
+
+        if len(hints) == 2:
+            hints.append(
+                "Suggested commands:\n"
+                "- rg -n \"<symbol>\" <candidate_file.py>\n"
+                "- nl -ba <candidate_file.py> | sed -n 'start,endp'"
+            )
+        return "\n".join(hints)
 
     def _extract_evidence_refs(self, text: str) -> set[str]:
         """提取 file.py:line 或 file.py:nl 形式证据。"""

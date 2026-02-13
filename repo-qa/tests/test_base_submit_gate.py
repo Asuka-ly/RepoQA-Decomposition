@@ -99,3 +99,26 @@ def test_soft_block_broad_scan_early_budget():
     )
     agent.exp_config = _Cfg()
     assert agent._should_soft_block_broad_scan("find . -name '*.py' | while read -r f; do cat $f; done") is True
+
+
+def test_broad_scan_rewrite_hint_uses_graph_templates():
+    class _GraphTools:
+        def graph_retrieve(self, symbols):
+            return {
+                "results": {
+                    "parse_action": [{"file": "agents/default.py", "line": 116}],
+                }
+            }
+
+    agent = _mk_agent(
+        messages=[
+            {"role": "system", "content": "x"},
+            {"role": "user", "content": "Where is parse_action defined?"},
+        ],
+        viewed_files=set(),
+        subq=None,
+    )
+    agent.graph_tools = _GraphTools()
+    text = agent._build_broad_scan_rewrite_hint("find . -name '*.py' | xargs cat")
+    assert "Suggested commands" in text
+    assert "agents/default.py" in text

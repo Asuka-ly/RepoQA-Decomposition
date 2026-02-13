@@ -134,7 +134,7 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
         # Dynamic fallback: call graph tools when evidence is stagnant.
         return self.subq_manager.no_new_evidence_steps >= self.exp_config.graph_tool_stagnation_steps and step % 2 == 0
 
-    def _maybe_trigger_redecompose(self, task_hint: str, step: int):
+    def _maybe_trigger_redecompose(self, task_hint: str, step: int, extra_reasons: list[str] | None = None):
         """基于质量信号尝试触发重分解。
 
         触发条件：来自 subquestion manager 的 replan 事件，且配置允许。
@@ -146,12 +146,15 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
         if len(self.subq_manager.replan_events) == 0:
             return
 
-        latest = self.subq_manager.replan_events[-1]
-        reasons = latest.get("reasons", [])
+        reasons = list(extra_reasons or [])
+        if len(self.subq_manager.replan_events) > 0:
+            latest = self.subq_manager.replan_events[-1]
+            reasons.extend(latest.get("reasons", []))
+        reasons = [r for r in reasons if r]
         if not reasons:
             return
 
-        if any(r in {"high_priority_stagnation", "decomposition_quality_drop", "no_new_evidence_for_3_steps"} for r in reasons):
+        if any(r in {"high_priority_stagnation", "decomposition_quality_drop", "no_new_evidence_for_3_steps", "relation_metric_imbalance"} for r in reasons):
             logger.info(f"🔁 Dynamic redecompose triggered at step={step}, reasons={reasons}")
             self._run_decompose_tool(task_hint, step=step, reason="replan")
 
@@ -196,6 +199,40 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
             if len(filtered) >= limit:
                 break
         return filtered
+
+    def _build_graph_action_hints(self, retrieve: dict, max_hints: int = 3) -> list[str]:
+        """把图检索结果转成可直接执行的候选动作模板。"""
+        hints = []
+        results = retrieve.get("results", {}) if isinstance(retrieve, dict) else {}
+        for symbol, items in results.items():
+            if not isinstance(items, list):
+                continue
+            for item in items[:2]:
+                file_path = item.get("file")
+                line = item.get("line")
+                qname = item.get("qname") or item.get("name") or symbol
+                if not file_path:
+                    continue
+                hints.append(
+                    f"rg -n \"{symbol}\" {file_path}  # anchor {qname}"
+                )
+                if line:
+                    start = max(1, int(line) - 20)
+                    end = int(line) + 40
+                    hints.append(f"nl -ba {file_path} | sed -n '{start},{end}p'")
+                if len(hints) >= max_hints:
+                    return hints[:max_hints]
+        return hints[:max_hints]
+
+    def _relation_replan_needed(self) -> bool:
+        """把 relation 指标纳入重分解判断（第4点落地）。"""
+        if not self.decomposition_quality:
+            return False
+        relation = self.decomposition_quality.get("relation", {}) if isinstance(self.decomposition_quality, dict) else {}
+        overlap_balance = float(relation.get("overlap_balance", 1.0))
+        completeness_proxy = float(relation.get("completeness_proxy", 1.0))
+        # 关系结构失衡 + 证据停滞时触发
+        return (overlap_balance < 0.45 or completeness_proxy < 0.55) and self.subq_manager.no_new_evidence_steps >= 2
 
     def get_observation(self, response: dict) -> dict:
         """处理 observation 并执行动态工具调用。
@@ -249,6 +286,9 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
                         f"coverage={validate.get('grounding_coverage', 0.0)} "
                         f"exec={validate.get('executable_entry_rate', 0.0)}"
                     )
+                    action_hints = self._build_graph_action_hints(retrieve)
+                    if action_hints:
+                        graph_hint += "\n[GRAPH NEXT ACTIONS]\n- " + "\n- ".join(action_hints)
                     obs_dict["observation"] += "\n" + graph_hint
                     obs_dict["output"] = obs_dict["observation"]
 
@@ -258,14 +298,21 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
                 observation=obs_dict.get("observation", ""),
                 graph_hint=graph_hint,
             )
-            if self.subq_manager.check_replan_needed(step):
+            manager_replan = self.subq_manager.check_replan_needed(step)
+            relation_replan = self._relation_replan_needed()
+            if manager_replan or relation_replan:
+                reasons = []
+                if manager_replan and self.subq_manager.replan_events:
+                    reasons.extend(self.subq_manager.replan_events[-1].get("reasons", []))
+                if relation_replan:
+                    reasons.append("relation_metric_imbalance")
                 obs_dict["observation"] += (
                     "\n\n⚠️ [REPLAN SIGNAL] Quality indicates replanning is needed. "
-                    "Refocus on unresolved symbols or switch entry candidates."
+                    f"Reasons={sorted(set(reasons))}."
                 )
                 obs_dict["output"] = obs_dict["observation"]
                 task_hint = self.messages[1]["content"] if len(self.messages) > 1 else ""
-                self._maybe_trigger_redecompose(task_hint, step)
+                self._maybe_trigger_redecompose(task_hint, step, extra_reasons=reasons)
 
         return obs_dict
 

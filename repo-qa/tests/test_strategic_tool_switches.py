@@ -56,3 +56,28 @@ def test_lazy_decompose_bootstrap_skips_broad_scan_script():
         step=0,
     )
     assert called["n"] == 0
+
+
+def test_build_graph_action_hints_from_retrieve_result():
+    agent = _mk_agent()
+    hints = agent._build_graph_action_hints({
+        "results": {
+            "parse_action": [
+                {"file": "agents/default.py", "line": 116, "qname": "DefaultAgent.parse_action"}
+            ]
+        }
+    })
+    assert any("rg -n" in h for h in hints)
+    assert any("nl -ba agents/default.py" in h for h in hints)
+
+
+def test_relation_replan_needed_when_metrics_bad_and_stagnant():
+    agent = _mk_agent()
+    agent.decomposition_quality = {
+        "relation": {
+            "overlap_balance": 0.2,
+            "completeness_proxy": 0.4,
+        }
+    }
+    agent.subq_manager = SimpleNamespace(no_new_evidence_steps=2, sub_questions=[])
+    assert agent._relation_replan_needed() is True
