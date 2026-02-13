@@ -72,3 +72,35 @@ def test_decomposition_action_freezes_required_subq_fields_and_contract_keys():
     assert "evidence_requirements" in result.decomposition
     assert "quality_estimate" in result.decomposition
     assert result.decomposition["replan_triggers"] == DEFAULT_REPLAN_TRIGGERS
+
+
+def test_decomposition_action_quality_contains_relation_metrics():
+    payload = {
+        "sub_questions": [
+            {
+                "id": "SQ1",
+                "sub_question": "Where parse_action is defined?",
+                "entry_candidates": ["agents/default.py::DefaultAgent.parse_action"],
+                "symbols": ["parse_action", "DefaultAgent"],
+                "required_evidence": ["definition location", "call path"],
+                "priority": 1,
+            },
+            {
+                "id": "SQ2",
+                "sub_question": "How execute_action handles timeout?",
+                "entry_candidates": ["agents/default.py::DefaultAgent.execute_action"],
+                "symbols": ["execute_action", "DefaultAgent"],
+                "required_evidence": ["exception path", "raise location"],
+                "priority": 2,
+            },
+        ],
+        "unresolved_symbols": [],
+    }
+    action = DecompositionAction(_StubDecomposer(payload, graph=_StubGraph()))
+    result = action.execute("dummy question")
+
+    rel = result.quality["relation"]
+    assert "symbol_overlap" in rel
+    assert "dependency_signal" in rel
+    assert "completeness_proxy" in rel
+    assert "overlap_balance" in rel

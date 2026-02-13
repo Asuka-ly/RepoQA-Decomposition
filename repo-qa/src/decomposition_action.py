@@ -116,6 +116,48 @@ class DecompositionAction:
         decomposition.setdefault("unresolved_symbols", [])
         return decomposition
 
+    def _pairwise_symbol_overlap(self, subq: List[Dict[str, Any]]) -> float:
+        """计算子问题间符号集合的平均 Jaccard 重叠度。"""
+        sets = [set(str(x).lower() for x in sq.get("symbols", []) if str(x).strip()) for sq in subq]
+        pairs = []
+        for i in range(len(sets)):
+            for j in range(i + 1, len(sets)):
+                a, b = sets[i], sets[j]
+                if not a and not b:
+                    continue
+                pairs.append(len(a & b) / max(1, len(a | b)))
+        if not pairs:
+            return 0.0
+        return round(sum(pairs) / len(pairs), 4)
+
+    def _dependency_signal(self, subq: List[Dict[str, Any]]) -> float:
+        """估计子问题间并行/依赖结构信号（priority 分层 + entry 跨模块性）。"""
+        priorities = [int(sq.get("priority", 99)) for sq in subq]
+        unique_priorities = len(set(priorities))
+        priority_layering = min(1.0, unique_priorities / max(1, len(subq)))
+
+        modules = []
+        for sq in subq:
+            for entry in sq.get("entry_candidates", []):
+                if isinstance(entry, str) and "::" in entry and ".py" in entry:
+                    modules.append(entry.split("::", 1)[0])
+        module_diversity = min(1.0, len(set(modules)) / max(1, len(subq))) if modules else 0.0
+        # 并行与依赖通常共存：priority 有层次 + entry 有跨模块分布
+        return round(0.55 * priority_layering + 0.45 * module_diversity, 4)
+
+    def _completeness_proxy(self, decomposition: Dict[str, Any], subq: List[Dict[str, Any]]) -> float:
+        """完备性代理指标：required_evidence 覆盖 + unresolved_symbols 约束。"""
+        req_ok = 0
+        for sq in subq:
+            req = sq.get("required_evidence", [])
+            if isinstance(req, list) and len(req) >= 2:
+                req_ok += 1
+        req_cov = req_ok / max(1, len(subq))
+
+        unresolved = decomposition.get("unresolved_symbols", [])
+        unresolved_penalty = min(0.4, 0.1 * len(unresolved)) if isinstance(unresolved, list) else 0.0
+        return round(max(0.0, req_cov - unresolved_penalty), 4)
+
     def _estimate_quality(self, decomposition: Dict[str, Any]) -> Dict[str, Any]:
         subq = decomposition.get("sub_questions", []) or []
         if not subq:
@@ -134,6 +176,12 @@ class DecompositionAction:
                     "evidence_yield": 0.0,
                     "completion_rate": 0.0,
                     "answer_alignment": 0.0,
+                },
+                "relation": {
+                    "symbol_overlap": 0.0,
+                    "dependency_signal": 0.0,
+                    "completeness_proxy": 0.0,
+                    "overlap_balance": 0.0,
                 },
             }
 
@@ -165,13 +213,31 @@ class DecompositionAction:
             "generic_entry_penalty": generic_entry_penalty,
         }
 
+        symbol_overlap = self._pairwise_symbol_overlap(subq)
+        # 目标是“有交叉但不过高”，把最佳区间放在 0.12~0.32
+        if symbol_overlap < 0.12:
+            overlap_balance = max(0.0, symbol_overlap / 0.12)
+        elif symbol_overlap > 0.32:
+            overlap_balance = max(0.0, 1.0 - (symbol_overlap - 0.32) / 0.68)
+        else:
+            overlap_balance = 1.0
+
+        dependency_signal = self._dependency_signal(subq)
+        completeness_proxy = self._completeness_proxy(decomposition, subq)
+
         # explainable weighted score
         prior_base = (
-            0.45 * prior["graph_grounding_coverage"]
-            + 0.35 * prior["entry_executability"]
-            + 0.20 * prior["subq_uniqueness"]
+            0.40 * prior["graph_grounding_coverage"]
+            + 0.25 * prior["entry_executability"]
+            + 0.15 * prior["subq_uniqueness"]
+            + 0.10 * dependency_signal
+            + 0.10 * completeness_proxy
         )
-        penalty = 0.15 * penalties["duplicate_subq_penalty"] + 0.15 * penalties["generic_entry_penalty"]
+        penalty = (
+            0.12 * penalties["duplicate_subq_penalty"]
+            + 0.12 * penalties["generic_entry_penalty"]
+            + 0.10 * (1.0 - overlap_balance)
+        )
         overall = round(max(0.0, prior_base - penalty), 4)
 
         return {
@@ -182,6 +248,12 @@ class DecompositionAction:
                 "evidence_yield": 0.0,
                 "completion_rate": 0.0,
                 "answer_alignment": 0.0,
+            },
+            "relation": {
+                "symbol_overlap": symbol_overlap,
+                "dependency_signal": dependency_signal,
+                "completeness_proxy": completeness_proxy,
+                "overlap_balance": round(overlap_balance, 4),
             },
             "sub_questions": total,
             "graph_validation": validation,

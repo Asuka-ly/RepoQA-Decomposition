@@ -78,3 +78,47 @@ def test_submit_command_must_be_standalone():
     assert agent._is_submit_signal("cat a.py && echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT") is True
     assert agent._is_standalone_submit_command("cat a.py && echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT") is False
     assert agent._is_standalone_submit_command("echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT") is True
+
+
+class _Cfg:
+    enable_scan_compensation = True
+    early_exploration_budget_steps = 2
+    allow_broad_scan_after_stagnation = 3
+
+
+def test_soft_block_broad_scan_early_budget():
+    agent = _mk_agent(
+        messages=[
+            {"role": "system", "content": "x"},
+            {"role": "user", "content": "question"},
+            {"role": "assistant", "content": "thought"},
+            {"role": "user", "content": "obs"},
+        ],
+        viewed_files={"a.py"},
+        subq=None,
+    )
+    agent.exp_config = _Cfg()
+    assert agent._should_soft_block_broad_scan("find . -name '*.py' | while read -r f; do cat $f; done") is True
+
+
+def test_broad_scan_rewrite_hint_uses_graph_templates():
+    class _GraphTools:
+        def graph_retrieve(self, symbols):
+            return {
+                "results": {
+                    "parse_action": [{"file": "agents/default.py", "line": 116}],
+                }
+            }
+
+    agent = _mk_agent(
+        messages=[
+            {"role": "system", "content": "x"},
+            {"role": "user", "content": "Where is parse_action defined?"},
+        ],
+        viewed_files=set(),
+        subq=None,
+    )
+    agent.graph_tools = _GraphTools()
+    text = agent._build_broad_scan_rewrite_hint("find . -name '*.py' | xargs cat")
+    assert "Suggested commands" in text
+    assert "agents/default.py" in text

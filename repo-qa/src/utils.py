@@ -193,6 +193,12 @@ Returns:
         lines.append("")
 
     lines.extend([
+        "TOOL USAGE PLAYBOOK:",
+        "- DECOMPOSE_WITH_GRAPH: use when question has multiple entities/modules or when evidence stalls for >=3 steps.",
+        "- GRAPH_RETRIEVE: call proactively before broad search to ground symbols and shortlist candidate files.",
+        "- GRAPH_VALIDATE: use after drafting sub-questions and before submit to check grounding_coverage/entry executability.",
+        "- Avoid repository-wide batch scripts at early steps; prefer focused rg/nl/sed loops over 1~3 candidate files.",
+        "",
         "SUBMISSION RULES (STRICT):",
         "1. Submit only after reading code and collecting traceable evidence.",
         "2. FINAL ANSWER must cover all critical sub-questions/aspects.",

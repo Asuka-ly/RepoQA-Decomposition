@@ -68,6 +68,14 @@ class BaseRepoQAAgent(DefaultAgent):
                     "returncode": 0,
                 }
 
+            # 补偿方案 B：对“全库脚本扫描”做软拦截（带改写建议）
+            if self._should_soft_block_broad_scan(command):
+                logger.warning("🚫 BROAD SCAN SOFT-BLOCKED: command is too wide for current stage")
+                return {
+                    "output": self._build_broad_scan_rewrite_hint(command),
+                    "returncode": 0,
+                }
+
             # 命令过滤
             should_block, reason = self.cmd_filter.should_block(command)
             if should_block:
@@ -79,6 +87,79 @@ class BaseRepoQAAgent(DefaultAgent):
 
         env.execute = filtered_execute
         logger.info("✓ Filter installed successfully")
+
+    def _is_broad_scan_command(self, command: str) -> bool:
+        """识别高噪声全库脚本扫描命令（while/for/xargs/管道+find）。"""
+        cmd = (command or "").lower()
+        markers = ["while ", "for ", "xargs", "|", ";", "&& find ", "find .", "find ./"]
+        # 仅当同时出现“枚举文件 + 批处理”时判定为 broad-scan，降低误伤
+        has_enumeration = any(k in cmd for k in ["find ", "rg --files", "ls -r", "fd "])
+        has_batch = any(m in cmd for m in markers)
+        return has_enumeration and has_batch
+
+    def _should_soft_block_broad_scan(self, command: str) -> bool:
+        """补偿方案 A/B：早期预算内禁止宽扫描；证据停滞后允许升级。"""
+        if not getattr(self.exp_config, "enable_scan_compensation", True):
+            return False
+        if not self._is_broad_scan_command(command):
+            return False
+
+        step_count = max(0, (len(getattr(self, "messages", [])) - 2) // 2)
+        early_budget = int(getattr(self.exp_config, "early_exploration_budget_steps", 2))
+        allow_after = int(getattr(self.exp_config, "allow_broad_scan_after_stagnation", 3))
+
+        manager = getattr(self, "subq_manager", None)
+        stagnation = int(getattr(manager, "no_new_evidence_steps", 0)) if manager is not None else 0
+
+        # 预算期内默认拦截；若证据已明显停滞，则放行升级探索
+        return step_count <= early_budget and stagnation < allow_after
+
+    def _build_broad_scan_rewrite_hint(self, command: str) -> str:
+        """补偿方案：把宽扫描重写为图引导的聚焦读取步骤。"""
+        hints = [
+            "Broad-scan command blocked for now.",
+            "Rewrite plan: (1) use GRAPH_RETRIEVE symbols, (2) rg on 1~3 files, (3) nl/sed around lines.",
+        ]
+
+        symbols = []
+        q = self.messages[1]["content"] if len(getattr(self, "messages", [])) > 1 else ""
+        symbols.extend(re.findall(r"\b[A-Z][a-zA-Z]{2,}\b|\b[a-z_]{4,}\b", q))
+        symbols = [x for i, x in enumerate(symbols) if x and x not in symbols[:i]][:3]
+
+        graph_tools = getattr(self, "graph_tools", None)
+        if graph_tools and symbols:
+            try:
+                retrieve = graph_tools.graph_retrieve(symbols)
+                results = retrieve.get("results", {}) if isinstance(retrieve, dict) else {}
+                templates = []
+                for sym, items in results.items():
+                    if not isinstance(items, list):
+                        continue
+                    for item in items[:1]:
+                        fp = item.get("file")
+                        ln = item.get("line")
+                        if not fp:
+                            continue
+                        templates.append(f"rg -n \"{sym}\" {fp}")
+                        if ln:
+                            templates.append(f"nl -ba {fp} | sed -n '{max(1, int(ln)-20)},{int(ln)+40}p'")
+                        if len(templates) >= 3:
+                            break
+                    if len(templates) >= 3:
+                        break
+                if templates:
+                    hints.append("Suggested commands:")
+                    hints.extend([f"- {t}" for t in templates])
+            except Exception:
+                pass
+
+        if len(hints) == 2:
+            hints.append(
+                "Suggested commands:\n"
+                "- rg -n \"<symbol>\" <candidate_file.py>\n"
+                "- nl -ba <candidate_file.py> | sed -n 'start,endp'"
+            )
+        return "\n".join(hints)
 
     def _extract_evidence_refs(self, text: str) -> set[str]:
         """提取 file.py:line 或 file.py:nl 形式证据。"""

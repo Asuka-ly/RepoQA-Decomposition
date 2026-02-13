@@ -147,7 +147,6 @@
 - 子问题状态信号增强：
   - transition.signal 从“统一 action 字符串”升级为“每个 subq 的命中明细”；
   - 包含 `symbol_hits` / `required_hits` / `entry_hits` / `hit_score`，便于解释为何同一步中各子问题进度不同。
-<<<<<<< codex/analyze-current-progress-and-required-changes-o51zm5
 
 ## 13. 稳定性回归结果（重构前锁稳）
 
@@ -170,5 +169,35 @@
   - 对 `while/for/xargs/pipe/find` 等“全库脚本扫描”动作不触发懒分解，降低上下文语义污染风险。
 - 重规划死循环抑制：
   - 提交动作（包括被拒绝提交）不再参与子问题进度更新与重规划计数，避免“提交失败 -> 无进展 -> 重分解”回路。
-=======
->>>>>>> main
+
+
+## 15. 补偿方案落地（A/B/C）与分解质量指标升级
+
+- A（受控探索预算）：
+  - 新增配置 `enable_scan_compensation / early_exploration_budget_steps / allow_broad_scan_after_stagnation`；
+  - 在早期预算内默认阻断“全库脚本扫描”，仅在证据连续停滞后允许升级探索。
+- B（软拦截+改写引导）：
+  - 对宽扫描命令返回可执行的改写建议（先 `rg` 定位，再 `nl/sed` 取证），避免直接失败导致策略崩坏。
+- C（图工具补偿）：
+  - 当 sub-question 尚未初始化时，允许从任务文本抽取候选 symbols 触发 `GRAPH_RETRIEVE`，降低禁用宽扫描后的信息损失。
+
+- 分解质量评估升级（relation-aware）：
+  - 新增 `relation` 维度：
+    - `symbol_overlap`：子问题间符号交叉强度；
+    - `overlap_balance`：鼓励“有交叉但不过高”；
+    - `dependency_signal`：priority 分层 + entry 跨模块分布；
+    - `completeness_proxy`：required_evidence 覆盖与 unresolved_symbols 约束。
+  - 说明：当前仍是“可解释代理指标”，尚不能严格等价于“语义完备性真值”；后续需结合人工标注或任务级回报做校准。
+
+
+## 16. 主动图调度四点落地（本轮）
+
+- ① 图调用前置（准前置）：
+  - 在每步 observation 后立即执行图检索/校验，并向下一步决策注入 `GRAPH NEXT ACTIONS` 模板；
+  - 实际效果是“在下一步动作生成前”给出图引导候选动作。
+- ② 图结果结构化为动作模板：
+  - 将 `GRAPH_RETRIEVE` 返回的 `file/line/symbol` 直接编译成 `rg` / `nl+sed` 命令建议，减少 LLM 自由度带来的偏航。
+- ③ 图作为宽扫描守门器：
+  - 当宽扫描被软拦截时，返回图引导改写建议（优先给出候选文件+行号附近读取模板），替代“直接拒绝不指导”。
+- ④ relation 指标接入重规划：
+  - 当 `overlap_balance/completeness_proxy` 明显失衡且证据停滞时，触发 relation 维度重分解信号（`relation_metric_imbalance`）。

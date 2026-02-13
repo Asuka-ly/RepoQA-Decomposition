@@ -40,6 +40,11 @@ class ExperimentConfig:
     enable_dynamic_graph_tool_calls: bool = True
     graph_tool_stagnation_steps: int = 2
 
+    # Compensation switches (stability before refactor)
+    enable_scan_compensation: bool = True
+    early_exploration_budget_steps: int = 2
+    allow_broad_scan_after_stagnation: int = 3
+
     # Model
     model_name: str = "gpt-5-mini"
     model_api_base: Optional[str] = None
