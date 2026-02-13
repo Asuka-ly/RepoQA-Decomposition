@@ -77,3 +77,35 @@ def test_empty_repo():
     with tempfile.TemporaryDirectory() as tmpdir:
         graph.build(tmpdir)
         assert graph.graph.number_of_nodes() == 0
+
+
+def test_method_level_qname_and_calls(tmp_path):
+    """方法级节点应包含类限定，并优先连到同类方法。"""
+    code = '''
+class A:
+    def foo(self):
+        self.bar()
+
+    def bar(self):
+        return 1
+
+def bar():
+    return 2
+'''
+    p = tmp_path / "m.py"
+    p.write_text(code, encoding="utf-8")
+
+    graph = CodeGraph()
+    graph.build(str(tmp_path))
+
+    foo_id = "m.py::A.foo"
+    bar_method_id = "m.py::A.bar"
+    bar_func_id = "m.py::bar"
+
+    assert foo_id in graph.graph.nodes
+    assert bar_method_id in graph.graph.nodes
+    assert bar_func_id in graph.graph.nodes
+
+    # 应连接到 A.bar 而不是模块级 bar
+    assert graph.graph.has_edge(foo_id, bar_method_id)
+    assert not graph.graph.has_edge(foo_id, bar_func_id)

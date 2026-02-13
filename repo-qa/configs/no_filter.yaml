@@ -1,17 +1,29 @@
-# === 模型配置 ===
+# === Model ===
 model_name: "gpt-5-mini"
 model_api_base: null
 
-# === 核心开关 ===
+# === Core switches ===
 enable_graph: true
 enable_graph_injection: true
-enable_command_filter: false  # 关键：关闭过滤
+enable_command_filter: false
 enable_pattern_detection: false
 
-# === 参数 ===
+# === Tool orchestration ===
+enable_decomposition_tool: true
+decompose_on_start: false
+enable_dynamic_redecompose: true
+max_decompose_calls: 2
+enable_graph_tools: true
+enable_dynamic_graph_tool_calls: true
+graph_tool_stagnation_steps: 2
+enable_scan_compensation: true
+early_exploration_budget_steps: 2
+allow_broad_scan_after_stagnation: 3
+
+# === Params ===
 injection_min_length: 6
 max_steps: 50
 
-# === 元信息 ===
+# === Metadata ===
 name: "no_filter"
-description: "消融：允许 Agent 执行任意命令"
+description: "Ablation: command filter disabled"
