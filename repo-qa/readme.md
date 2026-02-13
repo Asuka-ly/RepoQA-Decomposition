@@ -36,6 +36,11 @@
 离线冒烟实验（无外部 API）：
 - `python scripts/run_offline_smoke.py`
 
+SWE-QA-Bench 数据接入（用于后续实验/评估）：
+- `python scripts/fetch_swe_qa_bench.py --max-questions 200`
+- 默认会把题目抽取到 `data/questions/swe_qa_bench/`，并生成索引 `index.jsonl`
+- 运行示例：`python scripts/run_single.py --question-file swe_qa_bench/swe_qa_0001.txt`
+
 完整在线测试手册（依赖安装/API 配置/批量测试/排查）：
 - `docs/stage1_online_test_playbook.md`
 

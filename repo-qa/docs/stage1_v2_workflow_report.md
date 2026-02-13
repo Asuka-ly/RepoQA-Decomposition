@@ -201,3 +201,17 @@
   - 当宽扫描被软拦截时，返回图引导改写建议（优先给出候选文件+行号附近读取模板），替代“直接拒绝不指导”。
 - ④ relation 指标接入重规划：
   - 当 `overlap_balance/completeness_proxy` 明显失衡且证据停滞时，触发 relation 维度重分解信号（`relation_metric_imbalance`）。
+
+
+## 17. SWE-QA-Bench 数据接入（实验数据源）
+
+- 新增脚本：`scripts/fetch_swe_qa_bench.py`
+  - 默认从 `https://github.com/peng-weihan/SWE-QA-Bench` 拉取数据到 `data/external/SWE-QA-Bench`；
+  - 自动扫描 `json/jsonl/csv` 并启发式抽取问题文本；
+  - 物化输出到 `data/questions/swe_qa_bench/`，并生成 `index.jsonl`。
+- 使用方式：
+  - `python scripts/fetch_swe_qa_bench.py --max-questions 200`
+  - `python scripts/run_single.py --question-file swe_qa_bench/swe_qa_0001.txt`
+- 说明：
+  - 当前为 schema-agnostic 快速接入，便于先跑实验；
+  - 后续可针对官方字段做严格解析器与评估映射。
