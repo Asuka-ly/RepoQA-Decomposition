@@ -38,6 +38,7 @@ class BaseRepoQAAgent(DefaultAgent):
         self.viewed_files = set()
         self.start_time = None
         self.end_time = None
+        self._consecutive_submit_blocks = 0
 
         # 环境劫持
         logger.info("🔧 Installing command filter via env.execute hijacking...")
@@ -49,6 +50,7 @@ class BaseRepoQAAgent(DefaultAgent):
             # 检测提交信号
             if self._is_submit_signal(command):
                 if not self._is_standalone_submit_command(command):
+                    self._consecutive_submit_blocks += 1
                     logger.warning("🚫 SUBMISSION REJECTED: submit marker must be standalone")
                     return {
                         "output": "Submission blocked: run `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` as a standalone command.",
@@ -58,21 +60,41 @@ class BaseRepoQAAgent(DefaultAgent):
                 if self._can_submit():
                     logger.info("✅ TASK SUBMISSION DETECTED")
                     self._task_completed = True
+                    self._consecutive_submit_blocks = 0
                     return {
                         "output": "✅ Task submission confirmed.",
                         "returncode": 0,
                     }
+
+                self._consecutive_submit_blocks += 1
                 logger.warning("🚫 SUBMISSION REJECTED: insufficient evidence")
                 return {
-                    "output": "Submission blocked: need traceable code evidence and stronger progress before final submission.",
+                    "output": self._build_submit_reject_feedback(),
                     "returncode": 0,
                 }
 
+            self._consecutive_submit_blocks = 0
+
             # 补偿方案 B：对“全库脚本扫描”做软拦截（带改写建议）
             if self._should_soft_block_broad_scan(command):
-                logger.warning("🚫 BROAD SCAN SOFT-BLOCKED: command is too wide for current stage")
+                logger.info("↪️ BROAD SCAN REWRITTEN: command rewritten into focused lookup")
+                plan = self._build_broad_scan_rewrite_plan(command)
+                suggested = plan.get("commands", [])
+                if suggested:
+                    first_cmd = suggested[0]
+                    rewritten = original_execute(first_cmd, cwd, timeout=timeout)
+                    rewritten_output = rewritten.get("output", "") if isinstance(rewritten, dict) else ""
+                    return {
+                        "output": (
+                            "[AUTO REWRITE] Broad scan was rewritten into a focused command.\n"
+                            f"Original: {command}\n"
+                            f"Rewritten: {first_cmd}\n"
+                            f"{rewritten_output}"
+                        ),
+                        "returncode": rewritten.get("returncode", 0) if isinstance(rewritten, dict) else 0,
+                    }
                 return {
-                    "output": self._build_broad_scan_rewrite_hint(command),
+                    "output": plan.get("hint", "Broad-scan command blocked."),
                     "returncode": 0,
                 }
 
@@ -114,12 +136,13 @@ class BaseRepoQAAgent(DefaultAgent):
         # 预算期内默认拦截；若证据已明显停滞，则放行升级探索
         return step_count <= early_budget and stagnation < allow_after
 
-    def _build_broad_scan_rewrite_hint(self, command: str) -> str:
+    def _build_broad_scan_rewrite_plan(self, command: str) -> dict:
         """补偿方案：把宽扫描重写为图引导的聚焦读取步骤。"""
         hints = [
             "Broad-scan command blocked for now.",
             "Rewrite plan: (1) use GRAPH_RETRIEVE symbols, (2) rg on 1~3 files, (3) nl/sed around lines.",
         ]
+        commands: list[str] = []
 
         symbols = []
         q = self.messages[1]["content"] if len(getattr(self, "messages", [])) > 1 else ""
@@ -131,7 +154,6 @@ class BaseRepoQAAgent(DefaultAgent):
             try:
                 retrieve = graph_tools.graph_retrieve(symbols)
                 results = retrieve.get("results", {}) if isinstance(retrieve, dict) else {}
-                templates = []
                 for sym, items in results.items():
                     if not isinstance(items, list):
                         continue
@@ -140,26 +162,34 @@ class BaseRepoQAAgent(DefaultAgent):
                         ln = item.get("line")
                         if not fp:
                             continue
-                        templates.append(f"rg -n \"{sym}\" {fp}")
+                        cmd1 = f'rg -n "{sym}" {fp}'
+                        commands.append(cmd1)
                         if ln:
-                            templates.append(f"nl -ba {fp} | sed -n '{max(1, int(ln)-20)},{int(ln)+40}p'")
-                        if len(templates) >= 3:
+                            cmd2 = f"nl -ba {fp} | sed -n '{max(1, int(ln)-20)},{int(ln)+40}p'"
+                            commands.append(cmd2)
+                        if len(commands) >= 3:
                             break
-                    if len(templates) >= 3:
+                    if len(commands) >= 3:
                         break
-                if templates:
+                if commands:
                     hints.append("Suggested commands:")
-                    hints.extend([f"- {t}" for t in templates])
+                    hints.extend([f"- {t}" for t in commands])
             except Exception:
                 pass
 
-        if len(hints) == 2:
-            hints.append(
-                "Suggested commands:\n"
-                "- rg -n \"<symbol>\" <candidate_file.py>\n"
-                "- nl -ba <candidate_file.py> | sed -n 'start,endp'"
-            )
-        return "\n".join(hints)
+        if not commands:
+            commands = [
+                'rg -n "<symbol>" <candidate_file.py>',
+                "nl -ba <candidate_file.py> | sed -n 'start,endp'",
+            ]
+            hints.append("Suggested commands:")
+            hints.extend([f"- {t}" for t in commands])
+
+        return {"hint": "\n".join(hints), "commands": commands}
+
+    def _build_broad_scan_rewrite_hint(self, command: str) -> str:
+        """兼容旧接口：仅返回文本提示。"""
+        return self._build_broad_scan_rewrite_plan(command).get("hint", "")
 
     def _extract_evidence_refs(self, text: str) -> set[str]:
         """提取 file.py:line 或 file.py:nl 形式证据。"""
@@ -190,6 +220,10 @@ class BaseRepoQAAgent(DefaultAgent):
         total_subq = len(getattr(manager, "sub_questions", []) or []) if manager is not None else 0
         collected_evidence = self._collected_evidence_count()
         assistant_evidence = self._assistant_evidence_count()
+        cfg = getattr(self, "exp_config", None)
+        min_total_evidence = int(getattr(cfg, "min_submit_total_evidence", 2))
+        min_assistant_evidence = int(getattr(cfg, "min_submit_assistant_evidence", 2))
+        min_steps = int(getattr(cfg, "min_submit_steps", 4))
 
         # strategic 模式下按子问题规模设置最小浏览文件数；vanilla 至少读 1 个 .py
         min_viewed = 2 if total_subq >= 3 else 1
@@ -209,21 +243,107 @@ class BaseRepoQAAgent(DefaultAgent):
                 return False
             if evidence_refs < min_satisfied:
                 return False
-            if collected_evidence < min_satisfied:
+            if collected_evidence < max(min_satisfied, min_total_evidence):
                 return False
-            if assistant_evidence < min_satisfied:
+            if assistant_evidence < max(min_satisfied, min_assistant_evidence):
                 return False
             if satisfied + progressed < min(total, min_satisfied + 1):
                 return False
 
-            return step_count >= 3
+            return step_count >= min_steps
 
         # vanilla 模式：仍要求至少有一条可追溯证据，减少“长篇空答”提交
         if collected_evidence < 1:
             return False
         if assistant_evidence < 1:
             return False
-        return step_count >= 3
+        return step_count >= min_steps
+
+    def _submit_requirements_snapshot(self) -> dict:
+        """返回当前提交门槛快照，便于给 Agent 精准负反馈。"""
+        step_count = max(0, (len(getattr(self, "messages", [])) - 2) // 2)
+        manager = getattr(self, "subq_manager", None)
+        total_subq = len(getattr(manager, "sub_questions", []) or []) if manager is not None else 0
+        collected_evidence = self._collected_evidence_count()
+        assistant_evidence = self._assistant_evidence_count()
+        cfg = getattr(self, "exp_config", None)
+        min_total_evidence = int(getattr(cfg, "min_submit_total_evidence", 2))
+        min_assistant_evidence = int(getattr(cfg, "min_submit_assistant_evidence", 2))
+        min_steps = int(getattr(cfg, "min_submit_steps", 4))
+        min_viewed = 2 if total_subq >= 3 else 1
+        snap = {
+            "step_count": step_count,
+            "min_steps": min_steps,
+            "viewed_files": len(self.viewed_files),
+            "min_viewed": min_viewed,
+            "collected_evidence": collected_evidence,
+            "min_total_evidence": min_total_evidence,
+            "assistant_evidence": assistant_evidence,
+            "min_assistant_evidence": min_assistant_evidence,
+            "unmet": [],
+        }
+        if len(self.viewed_files) < min_viewed:
+            snap["unmet"].append(f"viewed_files<{min_viewed}")
+        if collected_evidence < min_total_evidence:
+            snap["unmet"].append(f"total_evidence<{min_total_evidence}")
+        if assistant_evidence < min_assistant_evidence:
+            snap["unmet"].append(f"assistant_evidence<{min_assistant_evidence}")
+        if step_count < min_steps:
+            snap["unmet"].append(f"steps<{min_steps}")
+
+        if manager is not None and getattr(manager, "sub_questions", None):
+            subq = manager.sub_questions
+            total = len(subq)
+            satisfied = sum(1 for x in subq if x.get("status") == "satisfied")
+            progressed = sum(1 for x in subq if float(x.get("progress", 0.0)) >= 0.6)
+            evidence_refs = sum(len(x.get("evidence_found", [])) for x in subq)
+            min_satisfied = 1 if total <= 2 else max(2, (total + 1) // 2)
+            snap.update({
+                "total_subq": total,
+                "satisfied_subq": satisfied,
+                "progressed_subq": progressed,
+                "subq_evidence_refs": evidence_refs,
+                "min_satisfied": min_satisfied,
+            })
+            if satisfied < min_satisfied:
+                snap["unmet"].append(f"satisfied_subq<{min_satisfied}")
+            if evidence_refs < min_satisfied:
+                snap["unmet"].append(f"subq_evidence<{min_satisfied}")
+            if satisfied + progressed < min(total, min_satisfied + 1):
+                snap["unmet"].append("subq_progress_insufficient")
+
+        return snap
+
+    def _build_submit_reject_feedback(self) -> str:
+        snap = self._submit_requirements_snapshot()
+        unmet = snap.get("unmet", [])
+        lines = [
+            "Submission blocked: insufficient evidence/progress.",
+            "[SUBMIT GATE STATUS]",
+            f"- steps: {snap.get('step_count', 0)}/{snap.get('min_steps', 0)}",
+            f"- viewed_files: {snap.get('viewed_files', 0)}/{snap.get('min_viewed', 0)}",
+            f"- evidence(total): {snap.get('collected_evidence', 0)}/{snap.get('min_total_evidence', 0)}",
+            f"- evidence(assistant): {snap.get('assistant_evidence', 0)}/{snap.get('min_assistant_evidence', 0)}",
+        ]
+        if "min_satisfied" in snap:
+            lines.append(
+                f"- subq_satisfied: {snap.get('satisfied_subq', 0)}/{snap.get('min_satisfied', 0)} "
+                f"(progressed={snap.get('progressed_subq', 0)}, subq_evidence={snap.get('subq_evidence_refs', 0)})"
+            )
+        if unmet:
+            lines.append(f"- unmet: {', '.join(unmet)}")
+
+        refs = sorted({r for msg in getattr(self, 'messages', []) for r in self._extract_evidence_refs(msg.get('content', ''))})
+        if refs:
+            lines.append("- collected_refs: " + ", ".join(refs[-6:]))
+
+        lines.append("[NEXT ACTION] Read targeted code and cite file.py:line evidence before submitting again.")
+        max_blocks = int(getattr(getattr(self, "exp_config", None), "max_consecutive_submit_blocks", 3))
+        if self._consecutive_submit_blocks >= max_blocks:
+            lines.append(
+                "[LOOP GUARD] Repeated submission attempts detected. Stop submitting now; run rg/cat/nl on unresolved symbols first."
+            )
+        return "\n".join(lines)
 
     def _is_submit_signal(self, command: str) -> bool:
         """检测提交信号（允许命令中出现提交标记，但不代表可提交）。"""

@@ -29,3 +29,23 @@ def test_graph_retrieve_and_validate():
     )
     assert val["grounding_coverage"] == 0.5
     assert val["executable_entry_rate"] == 0.5
+
+
+class _StubGraphWithFiles:
+    def __init__(self):
+        self.file_contents = {
+            "agents/default.py": """def dynamic_exec():
+    return run_dynamic_timeout()
+"""
+        }
+
+    def search_symbol(self, keyword: str, limit: int = 5):
+        return []
+
+
+def test_graph_retrieve_lexical_fallback_when_ast_misses():
+    tools = GraphTools(_StubGraphWithFiles())
+    r = tools.graph_retrieve(["run_dynamic_timeout"])
+    assert r["grounded"] == 1
+    assert r["fallback_hits"] == 1
+    assert r["retrieval_mode"] == "ast+lexical"

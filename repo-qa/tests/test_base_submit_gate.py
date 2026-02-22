@@ -36,10 +36,11 @@ def test_can_submit_vanilla_passes_with_evidence_ref_and_steps():
             {"role": "user", "content": "question"},
             {"role": "assistant", "content": "agents/default.py:116"},
             {"role": "user", "content": "ok"},
-            {"role": "assistant", "content": "more"},
+            {"role": "assistant", "content": "more agents/default.py:131"},
             {"role": "user", "content": "obs"},
             {"role": "assistant", "content": "mid"},
             {"role": "user", "content": "obs2"},
+            {"role": "assistant", "content": "mid2"},
             {"role": "assistant", "content": "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"},
         ],
         viewed_files={"agents/default.py"},
@@ -66,6 +67,8 @@ def test_can_submit_strategic_needs_satisfied_and_evidence():
             {"role": "user", "content": "obs2"},
             {"role": "assistant", "content": "final"},
             {"role": "user", "content": "obs3"},
+            {"role": "assistant", "content": "note"},
+            {"role": "user", "content": "obs4"},
         ],
         viewed_files={"a.py", "b.py"},
         subq=subq,
@@ -122,3 +125,28 @@ def test_broad_scan_rewrite_hint_uses_graph_templates():
     text = agent._build_broad_scan_rewrite_hint("find . -name '*.py' | xargs cat")
     assert "Suggested commands" in text
     assert "agents/default.py" in text
+
+
+class _CfgSubmitGuard:
+    min_submit_total_evidence = 2
+    min_submit_assistant_evidence = 2
+    min_submit_steps = 4
+    max_consecutive_submit_blocks = 2
+
+
+def test_submit_reject_feedback_contains_actionable_gaps():
+    agent = _mk_agent(
+        messages=[
+            {"role": "system", "content": "x"},
+            {"role": "user", "content": "question"},
+            {"role": "assistant", "content": "draft"},
+        ],
+        viewed_files=set(),
+        subq=None,
+    )
+    agent.exp_config = _CfgSubmitGuard()
+    agent._consecutive_submit_blocks = 2
+    text = agent._build_submit_reject_feedback()
+    assert "[SUBMIT GATE STATUS]" in text
+    assert "unmet" in text
+    assert "[LOOP GUARD]" in text

@@ -2,18 +2,19 @@
 
 用途：
 1) 从 GitHub 拉取 `peng-weihan/SWE-QA-Bench` 到本地 `data/external/`；
-2) 自动扫描 json/jsonl/csv 数据文件；
-3) 尝试抽取可直接运行的 question 文本，落盘到 `data/questions/swe_qa_bench/`。
+2) 自动扫描多种结构化文件并尽可能抽取问题文本；
+3) 物化成 `data/questions/swe_qa_bench/*.txt` + `index.jsonl`。
 
 说明：
-- 抽取逻辑是启发式（schema-agnostic），用于快速接入与实验；
-- 如果后续确定官方字段，可再收敛为严格 schema parser。
+- 当前为 schema-agnostic 快速接入（优先可用性）；
+- 已增强对弱结构数据（yaml/markdown）的兜底抽取，降低“0 条数据”概率。
 """
 from __future__ import annotations
 
 import argparse
 import csv
 import json
+import re
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
@@ -43,13 +44,11 @@ def run_git_clone(url: str, target_dir: Path, refresh: bool = False) -> None:
         return
 
     target_dir.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        ["git", "clone", "--depth", "1", url, str(target_dir)],
-        check=True,
-    )
+    subprocess.run(["git", "clone", "--depth", "1", url, str(target_dir)], check=True)
 
 
 def _candidate_files(repo_dir: Path) -> List[Path]:
+    """候选文件集合（放宽过滤，避免漏掉有效数据文件）。"""
     files: List[Path] = []
     for p in repo_dir.rglob("*"):
         if not p.is_file():
@@ -57,26 +56,43 @@ def _candidate_files(repo_dir: Path) -> List[Path]:
         if any(x in p.parts for x in {".git", "node_modules", "venv", "__pycache__"}):
             continue
         suffix = p.suffix.lower()
-        if suffix not in {".json", ".jsonl", ".csv"}:
-            continue
-        name = p.name.lower()
-        if any(k in name for k in ["question", "bench", "dataset", "task", "eval", "qa"]):
+        if suffix in {".json", ".jsonl", ".csv", ".yaml", ".yml", ".md"}:
             files.append(p)
     return files
 
 
+def _is_question_like(text: str) -> bool:
+    t = (text or "").strip()
+    if len(t) < 12:
+        return False
+    if len(t) > 1200:
+        return False
+    if "http://" in t or "https://" in t:
+        return False
+    return t.endswith("?") or t.lower().startswith(("what ", "why ", "how ", "where ", "which "))
+
+
 def _extract_question_text(record: Dict[str, Any]) -> str | None:
+    """优先按语义字段抽取，失败后做浅层字符串搜索。"""
     for key in QUESTION_KEYS:
         val = record.get(key)
         if isinstance(val, str) and val.strip():
             return val.strip()
-    # fallback: nested dict search (1-level)
-    for _, val in record.items():
-        if isinstance(val, dict):
+
+    # fallback: nested dict/list shallow traversal
+    stack: List[Any] = list(record.values())
+    while stack:
+        cur = stack.pop()
+        if isinstance(cur, str) and _is_question_like(cur):
+            return cur.strip()
+        if isinstance(cur, dict):
             for key in QUESTION_KEYS:
-                sub = val.get(key)
+                sub = cur.get(key)
                 if isinstance(sub, str) and sub.strip():
                     return sub.strip()
+            stack.extend(cur.values())
+        elif isinstance(cur, list):
+            stack.extend(cur[:20])
     return None
 
 
@@ -93,25 +109,26 @@ def _iter_json_records(path: Path) -> Iterable[Dict[str, Any]]:
                     continue
                 if isinstance(data, dict):
                     yield data
-    else:
-        with path.open(encoding="utf-8", errors="ignore") as f:
-            try:
-                data = json.load(f)
-            except json.JSONDecodeError:
-                return
-        if isinstance(data, dict):
-            # common top-level arrays
-            for k in ["data", "items", "questions", "examples", "records"]:
-                v = data.get(k)
-                if isinstance(v, list):
-                    for x in v:
-                        if isinstance(x, dict):
-                            yield x
-            yield data
-        elif isinstance(data, list):
-            for x in data:
-                if isinstance(x, dict):
-                    yield x
+        return
+
+    with path.open(encoding="utf-8", errors="ignore") as f:
+        try:
+            data = json.load(f)
+        except json.JSONDecodeError:
+            return
+
+    if isinstance(data, dict):
+        for k in ["data", "items", "questions", "examples", "records", "instances"]:
+            v = data.get(k)
+            if isinstance(v, list):
+                for x in v:
+                    if isinstance(x, dict):
+                        yield x
+        yield data
+    elif isinstance(data, list):
+        for x in data:
+            if isinstance(x, dict):
+                yield x
 
 
 def _iter_csv_records(path: Path) -> Iterable[Dict[str, Any]]:
@@ -121,31 +138,75 @@ def _iter_csv_records(path: Path) -> Iterable[Dict[str, Any]]:
             yield dict(row)
 
 
+def _iter_yaml_like_records(path: Path) -> Iterable[Dict[str, Any]]:
+    """最小依赖 YAML 解析：优先 json 化尝试，失败则按行抽取 question-like 文本。"""
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    # 先尝试按 JSON 解析（部分 yaml 兼容）
+    try:
+        data = json.loads(text)
+        if isinstance(data, dict):
+            yield data
+        elif isinstance(data, list):
+            for x in data:
+                if isinstance(x, dict):
+                    yield x
+        return
+    except Exception:
+        pass
+
+    # 行级兜底：只抓看起来像问题的行
+    for i, line in enumerate(text.splitlines(), 1):
+        clean = line.strip(" -\t#")
+        if _is_question_like(clean):
+            yield {"question": clean, "_line": i}
+
+
+def _iter_markdown_questions(path: Path) -> Iterable[Dict[str, Any]]:
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    # 句子级别 question 抽取
+    for i, line in enumerate(text.splitlines(), 1):
+        clean = line.strip(" -\t#>*")
+        if _is_question_like(clean):
+            yield {"question": clean, "_line": i}
+
+
 def collect_questions(repo_dir: Path, max_questions: int = 200) -> List[Dict[str, Any]]:
     """扫描并抽取可用 question。"""
     results: List[Dict[str, Any]] = []
+    seen = set()
+
     for fp in _candidate_files(repo_dir):
         if len(results) >= max_questions:
             break
-        it: Iterable[Dict[str, Any]]
-        if fp.suffix.lower() in {".json", ".jsonl"}:
-            it = _iter_json_records(fp)
-        else:
-            it = _iter_csv_records(fp)
 
-        for idx, rec in enumerate(it, 1):
+        suffix = fp.suffix.lower()
+        if suffix in {".json", ".jsonl"}:
+            iterator = _iter_json_records(fp)
+        elif suffix == ".csv":
+            iterator = _iter_csv_records(fp)
+        elif suffix in {".yaml", ".yml"}:
+            iterator = _iter_yaml_like_records(fp)
+        else:
+            iterator = _iter_markdown_questions(fp)
+
+        for idx, rec in enumerate(iterator, 1):
             q = _extract_question_text(rec)
             if not q:
                 continue
+            q_norm = re.sub(r"\s+", " ", q).strip()
+            if q_norm in seen:
+                continue
+            seen.add(q_norm)
             results.append(
                 {
                     "source_file": str(fp.relative_to(repo_dir)),
                     "source_index": idx,
-                    "question": q,
+                    "question": q_norm,
                 }
             )
             if len(results) >= max_questions:
                 break
+
     return results
 
 

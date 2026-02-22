@@ -18,3 +18,17 @@ def test_allow_cat():
     filter = CommandFilter(enabled=True)
     should_block, reason = filter.should_block("cat file.py")
     assert not should_block
+
+
+def test_block_python_script_with_path():
+    filter = CommandFilter(enabled=True)
+    should_block, reason = filter.should_block("python tools/simulate_timeout.py")
+    assert should_block
+    assert "script" in reason.lower()
+
+
+def test_block_heredoc_attempt():
+    filter = CommandFilter(enabled=True)
+    should_block, reason = filter.should_block("cat <<'EOF' > fake.txt")
+    assert should_block
+    assert any(k in reason.lower() for k in ["heredoc", "redirection"])

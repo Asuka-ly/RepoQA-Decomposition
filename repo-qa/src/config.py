@@ -45,6 +45,13 @@ class ExperimentConfig:
     early_exploration_budget_steps: int = 2
     allow_broad_scan_after_stagnation: int = 3
 
+
+    # Submit gate (stability)
+    min_submit_total_evidence: int = 2
+    min_submit_assistant_evidence: int = 2
+    min_submit_steps: int = 4
+    max_consecutive_submit_blocks: int = 3
+
     # Model
     model_name: str = "gpt-5-mini"
     model_api_base: Optional[str] = None
