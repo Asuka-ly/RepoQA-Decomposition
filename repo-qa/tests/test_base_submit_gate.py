@@ -125,3 +125,28 @@ def test_broad_scan_rewrite_hint_uses_graph_templates():
     text = agent._build_broad_scan_rewrite_hint("find . -name '*.py' | xargs cat")
     assert "Suggested commands" in text
     assert "agents/default.py" in text
+
+
+class _CfgSubmitGuard:
+    min_submit_total_evidence = 2
+    min_submit_assistant_evidence = 2
+    min_submit_steps = 4
+    max_consecutive_submit_blocks = 2
+
+
+def test_submit_reject_feedback_contains_actionable_gaps():
+    agent = _mk_agent(
+        messages=[
+            {"role": "system", "content": "x"},
+            {"role": "user", "content": "question"},
+            {"role": "assistant", "content": "draft"},
+        ],
+        viewed_files=set(),
+        subq=None,
+    )
+    agent.exp_config = _CfgSubmitGuard()
+    agent._consecutive_submit_blocks = 2
+    text = agent._build_submit_reject_feedback()
+    assert "[SUBMIT GATE STATUS]" in text
+    assert "unmet" in text
+    assert "[LOOP GUARD]" in text

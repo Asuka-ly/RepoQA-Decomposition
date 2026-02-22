@@ -46,6 +46,7 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
         self.decomposition = None
         self.decomposition_quality = None
         self.decomposition_workflow_trace = []
+        self.root_task = ""
 
     def _run_decompose_tool(self, task: str, step: int = 0, reason: str = "initial") -> bool:
         """调用 DECOMPOSE_WITH_GRAPH 工具。
@@ -84,6 +85,7 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
 
     def run(self, task: str, repo_path: str = None):
         self.start_time = datetime.now()
+        self.root_task = task or ""
 
         if self.exp_config.enable_graph and repo_path:
             self.code_graph = CodeGraph()
@@ -156,7 +158,12 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
 
         if any(r in {"high_priority_stagnation", "decomposition_quality_drop", "no_new_evidence_for_3_steps", "relation_metric_imbalance"} for r in reasons):
             logger.info(f"🔁 Dynamic redecompose triggered at step={step}, reasons={reasons}")
-            self._run_decompose_tool(task_hint, step=step, reason="replan")
+            focused_hint = (
+                "[REPLAN FOCUS] Keep decomposition strictly aligned with the original user question. "
+                "Ignore unrelated file names or modules unless they directly explain the asked issue.\n"
+                f"[ORIGINAL QUESTION] {task_hint}"
+            )
+            self._run_decompose_tool(focused_hint, step=step, reason="replan")
 
     def _maybe_bootstrap_decompose_from_action(self, action: str, step: int):
         """懒加载分解：当未开局分解时，从探索动作中触发。
@@ -180,13 +187,13 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
 
         should_bootstrap = any(k in action_l for k in ["rg ", "grep", "cat ", "nl -ba", "sed -n"])
         if should_bootstrap and step >= 0:
-            task_hint = self.messages[1]["content"] if len(self.messages) > 1 else ""
+            task_hint = getattr(self, "root_task", "") or (self.messages[1]["content"] if len(self.messages) > 1 else "")
             if self._run_decompose_tool(task_hint, step=step, reason="lazy_bootstrap"):
                 logger.info("🧠 Lazy DECOMPOSE_WITH_GRAPH triggered from agent action.")
 
     def _fallback_symbols_from_task(self, limit: int = 5) -> list[str]:
         """补偿方案 C：当 subq 尚未初始化时，从问题文本抽取轻量 symbols 供图检索。"""
-        task = self.messages[1]["content"] if len(getattr(self, "messages", [])) > 1 else ""
+        task = getattr(self, "root_task", "") or (self.messages[1]["content"] if len(getattr(self, "messages", [])) > 1 else "")
         cands = re.findall(r"\b[A-Z][a-zA-Z]{2,}\b|\b[a-z_]{4,}\b", task)
         stop = {"with", "from", "that", "this", "what", "where", "when", "which", "about", "should"}
         filtered = []
@@ -311,7 +318,7 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
                     f"Reasons={sorted(set(reasons))}."
                 )
                 obs_dict["output"] = obs_dict["observation"]
-                task_hint = self.messages[1]["content"] if len(self.messages) > 1 else ""
+                task_hint = getattr(self, "root_task", "") or (self.messages[1]["content"] if len(self.messages) > 1 else "")
                 self._maybe_trigger_redecompose(task_hint, step, extra_reasons=reasons)
 
         return obs_dict

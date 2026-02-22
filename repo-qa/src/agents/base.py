@@ -38,6 +38,7 @@ class BaseRepoQAAgent(DefaultAgent):
         self.viewed_files = set()
         self.start_time = None
         self.end_time = None
+        self._consecutive_submit_blocks = 0
 
         # 环境劫持
         logger.info("🔧 Installing command filter via env.execute hijacking...")
@@ -49,6 +50,7 @@ class BaseRepoQAAgent(DefaultAgent):
             # 检测提交信号
             if self._is_submit_signal(command):
                 if not self._is_standalone_submit_command(command):
+                    self._consecutive_submit_blocks += 1
                     logger.warning("🚫 SUBMISSION REJECTED: submit marker must be standalone")
                     return {
                         "output": "Submission blocked: run `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` as a standalone command.",
@@ -58,15 +60,20 @@ class BaseRepoQAAgent(DefaultAgent):
                 if self._can_submit():
                     logger.info("✅ TASK SUBMISSION DETECTED")
                     self._task_completed = True
+                    self._consecutive_submit_blocks = 0
                     return {
                         "output": "✅ Task submission confirmed.",
                         "returncode": 0,
                     }
+
+                self._consecutive_submit_blocks += 1
                 logger.warning("🚫 SUBMISSION REJECTED: insufficient evidence")
                 return {
-                    "output": "Submission blocked: need traceable code evidence and stronger progress before final submission.",
+                    "output": self._build_submit_reject_feedback(),
                     "returncode": 0,
                 }
+
+            self._consecutive_submit_blocks = 0
 
             # 补偿方案 B：对“全库脚本扫描”做软拦截（带改写建议）
             if self._should_soft_block_broad_scan(command):
@@ -251,6 +258,92 @@ class BaseRepoQAAgent(DefaultAgent):
         if assistant_evidence < 1:
             return False
         return step_count >= min_steps
+
+    def _submit_requirements_snapshot(self) -> dict:
+        """返回当前提交门槛快照，便于给 Agent 精准负反馈。"""
+        step_count = max(0, (len(getattr(self, "messages", [])) - 2) // 2)
+        manager = getattr(self, "subq_manager", None)
+        total_subq = len(getattr(manager, "sub_questions", []) or []) if manager is not None else 0
+        collected_evidence = self._collected_evidence_count()
+        assistant_evidence = self._assistant_evidence_count()
+        cfg = getattr(self, "exp_config", None)
+        min_total_evidence = int(getattr(cfg, "min_submit_total_evidence", 2))
+        min_assistant_evidence = int(getattr(cfg, "min_submit_assistant_evidence", 2))
+        min_steps = int(getattr(cfg, "min_submit_steps", 4))
+        min_viewed = 2 if total_subq >= 3 else 1
+        snap = {
+            "step_count": step_count,
+            "min_steps": min_steps,
+            "viewed_files": len(self.viewed_files),
+            "min_viewed": min_viewed,
+            "collected_evidence": collected_evidence,
+            "min_total_evidence": min_total_evidence,
+            "assistant_evidence": assistant_evidence,
+            "min_assistant_evidence": min_assistant_evidence,
+            "unmet": [],
+        }
+        if len(self.viewed_files) < min_viewed:
+            snap["unmet"].append(f"viewed_files<{min_viewed}")
+        if collected_evidence < min_total_evidence:
+            snap["unmet"].append(f"total_evidence<{min_total_evidence}")
+        if assistant_evidence < min_assistant_evidence:
+            snap["unmet"].append(f"assistant_evidence<{min_assistant_evidence}")
+        if step_count < min_steps:
+            snap["unmet"].append(f"steps<{min_steps}")
+
+        if manager is not None and getattr(manager, "sub_questions", None):
+            subq = manager.sub_questions
+            total = len(subq)
+            satisfied = sum(1 for x in subq if x.get("status") == "satisfied")
+            progressed = sum(1 for x in subq if float(x.get("progress", 0.0)) >= 0.6)
+            evidence_refs = sum(len(x.get("evidence_found", [])) for x in subq)
+            min_satisfied = 1 if total <= 2 else max(2, (total + 1) // 2)
+            snap.update({
+                "total_subq": total,
+                "satisfied_subq": satisfied,
+                "progressed_subq": progressed,
+                "subq_evidence_refs": evidence_refs,
+                "min_satisfied": min_satisfied,
+            })
+            if satisfied < min_satisfied:
+                snap["unmet"].append(f"satisfied_subq<{min_satisfied}")
+            if evidence_refs < min_satisfied:
+                snap["unmet"].append(f"subq_evidence<{min_satisfied}")
+            if satisfied + progressed < min(total, min_satisfied + 1):
+                snap["unmet"].append("subq_progress_insufficient")
+
+        return snap
+
+    def _build_submit_reject_feedback(self) -> str:
+        snap = self._submit_requirements_snapshot()
+        unmet = snap.get("unmet", [])
+        lines = [
+            "Submission blocked: insufficient evidence/progress.",
+            "[SUBMIT GATE STATUS]",
+            f"- steps: {snap.get('step_count', 0)}/{snap.get('min_steps', 0)}",
+            f"- viewed_files: {snap.get('viewed_files', 0)}/{snap.get('min_viewed', 0)}",
+            f"- evidence(total): {snap.get('collected_evidence', 0)}/{snap.get('min_total_evidence', 0)}",
+            f"- evidence(assistant): {snap.get('assistant_evidence', 0)}/{snap.get('min_assistant_evidence', 0)}",
+        ]
+        if "min_satisfied" in snap:
+            lines.append(
+                f"- subq_satisfied: {snap.get('satisfied_subq', 0)}/{snap.get('min_satisfied', 0)} "
+                f"(progressed={snap.get('progressed_subq', 0)}, subq_evidence={snap.get('subq_evidence_refs', 0)})"
+            )
+        if unmet:
+            lines.append(f"- unmet: {', '.join(unmet)}")
+
+        refs = sorted({r for msg in getattr(self, 'messages', []) for r in self._extract_evidence_refs(msg.get('content', ''))})
+        if refs:
+            lines.append("- collected_refs: " + ", ".join(refs[-6:]))
+
+        lines.append("[NEXT ACTION] Read targeted code and cite file.py:line evidence before submitting again.")
+        max_blocks = int(getattr(getattr(self, "exp_config", None), "max_consecutive_submit_blocks", 3))
+        if self._consecutive_submit_blocks >= max_blocks:
+            lines.append(
+                "[LOOP GUARD] Repeated submission attempts detected. Stop submitting now; run rg/cat/nl on unresolved symbols first."
+            )
+        return "\n".join(lines)
 
     def _is_submit_signal(self, command: str) -> bool:
         """检测提交信号（允许命令中出现提交标记，但不代表可提交）。"""

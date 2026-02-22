@@ -26,6 +26,7 @@ max_steps: 50
 min_submit_total_evidence: 2
 min_submit_assistant_evidence: 2
 min_submit_steps: 4
+max_consecutive_submit_blocks: 3
 
 # === Metadata ===
 name: "no_graph"
