@@ -147,6 +147,6 @@ def test_submit_reject_feedback_contains_actionable_gaps():
     agent.exp_config = _CfgSubmitGuard()
     agent._consecutive_submit_blocks = 2
     text = agent._build_submit_reject_feedback()
-    assert "[SUBMIT GATE STATUS]" in text
+    assert "[SUBMIT_GATE] blocked" in text
     assert "unmet" in text
-    assert "[LOOP GUARD]" in text
+    assert "loop_guard=" in text

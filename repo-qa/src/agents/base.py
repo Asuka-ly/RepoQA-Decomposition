@@ -47,31 +47,25 @@ class BaseRepoQAAgent(DefaultAgent):
         def filtered_execute(command: str, cwd: str = "", *, timeout: int | None = None):
             logger.info(f"🛡️  FILTER CHECK: {command}")
 
-            # 检测提交信号
+            # 检测提交信号（执行层只做协议检查，业务判定在 get_observation）
             if self._is_submit_signal(command):
                 if not self._is_standalone_submit_command(command):
-                    self._consecutive_submit_blocks += 1
                     logger.warning("🚫 SUBMISSION REJECTED: submit marker must be standalone")
                     return {
                         "output": "Submission blocked: run `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` as a standalone command.",
                         "returncode": 0,
                     }
-
-                if self._can_submit():
-                    logger.info("✅ TASK SUBMISSION DETECTED")
-                    self._task_completed = True
-                    self._consecutive_submit_blocks = 0
-                    return {
-                        "output": "✅ Task submission confirmed.",
-                        "returncode": 0,
-                    }
-
-                self._consecutive_submit_blocks += 1
-                logger.warning("🚫 SUBMISSION REJECTED: insufficient evidence")
                 return {
-                    "output": self._build_submit_reject_feedback(),
+                    "output": "[SUBMIT_INTENT] submit_requested",
                     "returncode": 0,
                 }
+
+            # 统一工具调用入口：TOOL_CALL <TOOL_NAME> <JSON_ARGS>
+            if self._is_tool_call_command(command):
+                handler = getattr(self, "_handle_tool_call_command", None)
+                if callable(handler):
+                    return handler(command)
+                return {"output": "Tool call blocked: tool handler unavailable.", "returncode": 0}
 
             self._consecutive_submit_blocks = 0
 
@@ -109,6 +103,10 @@ class BaseRepoQAAgent(DefaultAgent):
 
         env.execute = filtered_execute
         logger.info("✓ Filter installed successfully")
+
+    def _is_tool_call_command(self, command: str) -> bool:
+        """统一工具命令语法：TOOL_CALL <TOOL_NAME> <JSON_ARGS>。"""
+        return bool(re.match(r"^\s*TOOL_CALL\s+[A-Z_]+(?:\s+\{.*\})?\s*$", command or ""))
 
     def _is_broad_scan_command(self, command: str) -> bool:
         """识别高噪声全库脚本扫描命令（while/for/xargs/管道+find）。"""
@@ -318,31 +316,28 @@ class BaseRepoQAAgent(DefaultAgent):
         snap = self._submit_requirements_snapshot()
         unmet = snap.get("unmet", [])
         lines = [
-            "Submission blocked: insufficient evidence/progress.",
-            "[SUBMIT GATE STATUS]",
-            f"- steps: {snap.get('step_count', 0)}/{snap.get('min_steps', 0)}",
-            f"- viewed_files: {snap.get('viewed_files', 0)}/{snap.get('min_viewed', 0)}",
-            f"- evidence(total): {snap.get('collected_evidence', 0)}/{snap.get('min_total_evidence', 0)}",
-            f"- evidence(assistant): {snap.get('assistant_evidence', 0)}/{snap.get('min_assistant_evidence', 0)}",
+            "[SUBMIT_GATE] blocked",
+            f"steps={snap.get('step_count', 0)}/{snap.get('min_steps', 0)}",
+            f"viewed={snap.get('viewed_files', 0)}/{snap.get('min_viewed', 0)}",
+            f"ev_total={snap.get('collected_evidence', 0)}/{snap.get('min_total_evidence', 0)}",
+            f"ev_assistant={snap.get('assistant_evidence', 0)}/{snap.get('min_assistant_evidence', 0)}",
         ]
         if "min_satisfied" in snap:
             lines.append(
-                f"- subq_satisfied: {snap.get('satisfied_subq', 0)}/{snap.get('min_satisfied', 0)} "
-                f"(progressed={snap.get('progressed_subq', 0)}, subq_evidence={snap.get('subq_evidence_refs', 0)})"
+                f"subq={snap.get('satisfied_subq', 0)}/{snap.get('min_satisfied', 0)} "
+                f"progressed={snap.get('progressed_subq', 0)} subq_ev={snap.get('subq_evidence_refs', 0)}"
             )
         if unmet:
             lines.append(f"- unmet: {', '.join(unmet)}")
 
         refs = sorted({r for msg in getattr(self, 'messages', []) for r in self._extract_evidence_refs(msg.get('content', ''))})
         if refs:
-            lines.append("- collected_refs: " + ", ".join(refs[-6:]))
+            lines.append("refs=" + ",".join(refs[-6:]))
 
-        lines.append("[NEXT ACTION] Read targeted code and cite file.py:line evidence before submitting again.")
+        lines.append("next=read_code_and_add_file.py:line_evidence")
         max_blocks = int(getattr(getattr(self, "exp_config", None), "max_consecutive_submit_blocks", 3))
         if self._consecutive_submit_blocks >= max_blocks:
-            lines.append(
-                "[LOOP GUARD] Repeated submission attempts detected. Stop submitting now; run rg/cat/nl on unresolved symbols first."
-            )
+            lines.append("loop_guard=stop_submit_and_run_rg_cat_nl")
         return "\n".join(lines)
 
     def _is_submit_signal(self, command: str) -> bool:
@@ -368,12 +363,27 @@ class BaseRepoQAAgent(DefaultAgent):
             is not None
         )
 
+    def _handle_submit_intent(self) -> str:
+        """策略层提交判定：执行层只上报 intent，这里给结构化反馈。"""
+        if self._can_submit():
+            logger.info("✅ TASK SUBMISSION DETECTED")
+            self._task_completed = True
+            self._consecutive_submit_blocks = 0
+            return "✅ Task submission confirmed."
+
+        self._consecutive_submit_blocks += 1
+        logger.warning("🚫 SUBMISSION REJECTED: insufficient evidence")
+        return self._build_submit_reject_feedback()
+
     def get_observation(self, response: dict) -> dict:
         """适配观察值处理 + 终止检测"""
         obs_dict = super().get_observation(response)
 
         # 键名适配
         raw_output = obs_dict.get("output") or obs_dict.get("observation") or ""
+        if raw_output.strip() == "[SUBMIT_INTENT] submit_requested":
+            raw_output = self._handle_submit_intent()
+            obs_dict["output"] = raw_output
         obs_dict["observation"] = raw_output
 
         step = max(0, (len(getattr(self, "messages", [])) - 2) // 2)

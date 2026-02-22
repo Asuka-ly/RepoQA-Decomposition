@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
 import re
 
 from src.agents.base import BaseRepoQAAgent
@@ -47,6 +48,8 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
         self.decomposition_quality = None
         self.decomposition_workflow_trace = []
         self.root_task = ""
+        self.unresolved_symbol_cooldown = {}
+        self._pending_replan_suggestion = ""
 
     def _run_decompose_tool(self, task: str, step: int = 0, reason: str = "initial") -> bool:
         """调用 DECOMPOSE_WITH_GRAPH 工具。
@@ -83,6 +86,70 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
         self.decompose_tool_calls += 1
         return True
 
+    def _handle_tool_call_command(self, command: str) -> dict:
+        """通过统一命令通道触发工具：TOOL_CALL <TOOL_NAME> <JSON_ARGS>。"""
+        m = re.match(r"^\s*TOOL_CALL\s+([A-Z_]+)(?:\s+(\{.*\}))?\s*$", command or "")
+        if not m:
+            return {"output": "Tool call parse error.", "returncode": 0}
+
+        tool = m.group(1)
+        args_raw = m.group(2)
+        try:
+            args = json.loads(args_raw) if args_raw else {}
+        except Exception:
+            return {"output": "Tool call parse error: args must be valid JSON.", "returncode": 0}
+
+        step = max(0, (len(getattr(self, "messages", [])) - 2) // 2)
+
+        if tool == "DECOMPOSE_WITH_GRAPH":
+            task = str(args.get("task") or getattr(self, "root_task", "") or "")
+            ok = self._run_decompose_tool(task, step=step, reason="manual_tool_call")
+            payload = {
+                "tool": tool,
+                "ok": bool(ok),
+                "subq_count": len(getattr(self.subq_manager, "sub_questions", []) or []),
+            }
+            return {"output": "[TOOL_RESULT] " + json.dumps(payload, ensure_ascii=False), "returncode": 0}
+
+        if tool == "GRAPH_RETRIEVE":
+            symbols = [str(x) for x in args.get("symbols", []) if str(x).strip()]
+            result = self.tool_registry.invoke(
+                step=step,
+                tool_name="GRAPH_RETRIEVE",
+                reason="manual_tool_call",
+                fn=lambda: self.graph_tools.graph_retrieve(symbols),
+                input_obj={"symbols": symbols},
+            )
+            unresolved = [sym for sym, items in (result.get("results", {}) or {}).items() if not items]
+            if unresolved:
+                for sym in unresolved:
+                    self.unresolved_symbol_cooldown[sym.lower()] = step + 3
+            payload = {
+                "tool": tool,
+                "grounded": result.get("grounded", 0),
+                "retrieval_mode": result.get("retrieval_mode", "unknown"),
+                "unresolved_symbols": unresolved,
+            }
+            return {"output": "[TOOL_RESULT] " + json.dumps(payload, ensure_ascii=False), "returncode": 0}
+
+        if tool == "GRAPH_VALIDATE":
+            sub_questions = args.get("sub_questions") or (getattr(self.subq_manager, "sub_questions", []) or [])[:3]
+            result = self.tool_registry.invoke(
+                step=step,
+                tool_name="GRAPH_VALIDATE",
+                reason="manual_tool_call",
+                fn=lambda: self.graph_tools.graph_validate(sub_questions),
+                input_obj={"sub_question_count": len(sub_questions)},
+            )
+            payload = {
+                "tool": tool,
+                "grounding_coverage": result.get("grounding_coverage", 0.0),
+                "executable_entry_rate": result.get("executable_entry_rate", 0.0),
+            }
+            return {"output": "[TOOL_RESULT] " + json.dumps(payload, ensure_ascii=False), "returncode": 0}
+
+        return {"output": f"Tool call blocked: unknown tool `{tool}`.", "returncode": 0}
+
     def run(self, task: str, repo_path: str = None):
         self.start_time = datetime.now()
         self.root_task = task or ""
@@ -102,6 +169,13 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
             self._run_decompose_tool(task, step=0, reason="initial")
 
         enhanced_task = build_task_prompt(task, repo_path, self.decomposition, self.exp_config)
+        enhanced_task += (
+            "\n\nTOOL CALL PROTOCOL (UNIFIED):"
+            "\n- Use one bash line: TOOL_CALL <TOOL_NAME> <JSON_ARGS>."
+            "\n- Supported: DECOMPOSE_WITH_GRAPH, GRAPH_RETRIEVE, GRAPH_VALIDATE."
+            "\n- Example: TOOL_CALL GRAPH_RETRIEVE {\"symbols\":[\"parse_action\"]}."
+        )
+
 
         try:
             _, message = super().run(enhanced_task)
@@ -272,6 +346,12 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
                 symbols = list(dict.fromkeys(symbols))[:5]
                 if not symbols:
                     symbols = self._fallback_symbols_from_task(limit=5)
+
+                # unresolved symbol cooldown：短期内避免反复检索同一无效符号
+                symbols = [
+                    sym for sym in symbols
+                    if self.unresolved_symbol_cooldown.get(sym.lower(), -1) < step
+                ]
                 if symbols:
                     retrieve = self.tool_registry.invoke(
                         step=step,
@@ -288,11 +368,20 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
                         input_obj={"sub_question_count": len(open_subq[:3])},
                     )
                     self.graph_tool_calls += 1
+                    unresolved_symbols = [
+                        sym for sym, items in (retrieve.get("results", {}) or {}).items() if not items
+                    ]
+                    if unresolved_symbols:
+                        for sym in unresolved_symbols:
+                            self.unresolved_symbol_cooldown[sym.lower()] = step + 3
+
                     graph_hint = (
                         f"[GRAPH TOOL] grounded={retrieve.get('grounded', 0)} "
                         f"coverage={validate.get('grounding_coverage', 0.0)} "
                         f"exec={validate.get('executable_entry_rate', 0.0)}"
                     )
+                    if unresolved_symbols:
+                        graph_hint += "\n[UNRESOLVED_SYMBOLS] " + ", ".join(unresolved_symbols)
                     action_hints = self._build_graph_action_hints(retrieve)
                     if action_hints:
                         graph_hint += "\n[GRAPH NEXT ACTIONS]\n- " + "\n- ".join(action_hints)
@@ -319,7 +408,10 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
                 )
                 obs_dict["output"] = obs_dict["observation"]
                 task_hint = getattr(self, "root_task", "") or (self.messages[1]["content"] if len(self.messages) > 1 else "")
-                self._maybe_trigger_redecompose(task_hint, step, extra_reasons=reasons)
+                payload = json.dumps({"task": task_hint}, ensure_ascii=False)
+                self._pending_replan_suggestion = f"TOOL_CALL DECOMPOSE_WITH_GRAPH {payload}"
+                obs_dict["observation"] += "\n[REPLAN ACTION] " + self._pending_replan_suggestion
+                obs_dict["output"] = obs_dict["observation"]
 
         return obs_dict
 

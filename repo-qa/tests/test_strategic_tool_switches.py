@@ -81,3 +81,22 @@ def test_relation_replan_needed_when_metrics_bad_and_stagnant():
     }
     agent.subq_manager = SimpleNamespace(no_new_evidence_steps=2, sub_questions=[])
     assert agent._relation_replan_needed() is True
+
+
+def test_manual_tool_call_retrieve_updates_unresolved_cooldown():
+    agent = _mk_agent()
+    agent.tool_registry = SimpleNamespace(invoke=lambda **kwargs: {"results": {"foo": []}, "grounded": 0, "retrieval_mode": "ast_only"})
+    agent.graph_tools = SimpleNamespace()
+    agent.unresolved_symbol_cooldown = {}
+    out = agent._handle_tool_call_command('TOOL_CALL GRAPH_RETRIEVE {"symbols":["foo"]}')
+    assert out["returncode"] == 0
+    assert "[TOOL_RESULT]" in out["output"]
+    assert agent.unresolved_symbol_cooldown.get("foo") is not None
+
+
+def test_base_tool_call_command_parser():
+    from src.agents.base import BaseRepoQAAgent
+
+    agent = BaseRepoQAAgent.__new__(BaseRepoQAAgent)
+    assert agent._is_tool_call_command('TOOL_CALL GRAPH_RETRIEVE {"symbols":["x"]}') is True
+    assert agent._is_tool_call_command('rg -n x foo.py') is False
