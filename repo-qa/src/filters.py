@@ -12,15 +12,17 @@ class CommandFilter:
         (r'\s+>>\s+\S+', "File appending via redirection is forbidden"),
         
         # 危险的文件创建命令
-        (r'\bcat\s+<<', "Heredoc file creation is forbidden"),  # cat <<EOF
+        (r"<<\s*['\"]?[A-Za-z_][A-Za-z0-9_]*", "Heredoc usage is forbidden in static audit mode"),
         (r'\btouch\b', "Creating files is forbidden"),
         (r'\brm\s+', "Deleting files is forbidden"),
         (r'\bmv\s+', "Moving files is forbidden"),
         
         # 执行类命令
         (r'\bsleep\s+\d', "Sleep is for testing, not analyzing"),
-        (r'\bpython\s+-c\b', "Direct code execution is forbidden"),
-        (r'\bpython\s+\w+\.py', "Script execution is forbidden"),
+        (r'\bpython(?:3)?\s+-c\b', "Direct code execute/execution is forbidden"),
+        (r'\bpython(?:3)?\s+-m\b', "Module execution is forbidden"),
+        (r'\bpython(?:3)?\s+<<', "Inline python heredoc execution is forbidden"),
+        (r'\bpython(?:3)?\s+\S+\.py\b', "Script execution is forbidden"),
         (r'\bpip\s+install', "Installing packages is forbidden"),
         
         # 危险的系统操作
