@@ -203,10 +203,13 @@ class BaseRepoQAAgent(DefaultAgent):
         return len(refs)
 
     def _assistant_evidence_count(self) -> int:
-        """仅统计 assistant 消息中的证据引用数（更严格的提交约束）。"""
+        """统计“模型可归因”证据量。
+
+        说明：实际证据通常出现在 observation（user role）里，若仅统计 assistant 会造成误拒。
+        """
         refs = set()
         for msg in getattr(self, "messages", []):
-            if msg.get("role") == "assistant":
+            if msg.get("role") in {"assistant", "user"}:
                 refs.update(self._extract_evidence_refs(msg.get("content", "")))
         return len(refs)
 
@@ -337,7 +340,7 @@ class BaseRepoQAAgent(DefaultAgent):
         lines.append("next=read_code_and_add_file.py:line_evidence")
         max_blocks = int(getattr(getattr(self, "exp_config", None), "max_consecutive_submit_blocks", 3))
         if self._consecutive_submit_blocks >= max_blocks:
-            lines.append("loop_guard=stop_submit_and_run_rg_cat_nl")
+            lines.append("loop_guard=stop_submit_and_run_rg_cat_nl required")
         return "\n".join(lines)
 
     def _is_submit_signal(self, command: str) -> bool:
@@ -423,10 +426,13 @@ class BaseRepoQAAgent(DefaultAgent):
 
             raise TerminatingException(self._final_answer or "Task completed")
 
-        # 统计查看的文件
+        # 统计查看的文件（支持 bash -lc 内联脚本）
         if "action" in obs_dict:
-            if match := re.search(r"(cat|nl|head|tail|less|sed)\s+.*?(\S+\.py)", obs_dict["action"]):
-                self.viewed_files.add(match.group(2))
+            action_text = obs_dict.get("action", "") or ""
+            files = set(re.findall(r"\b[\w./-]+\.py\b", action_text))
+            read_intent = any(k in action_text for k in ["cat ", "nl -ba", "sed -n", "head ", "tail ", "grep ", "rg "])
+            if read_intent:
+                self.viewed_files.update(files)
 
         return obs_dict
 
