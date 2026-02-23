@@ -52,6 +52,9 @@ class ExperimentConfig:
     min_submit_steps: int = 4
     max_consecutive_submit_blocks: int = 3
 
+    # Tool output detail level: summary | hybrid | full
+    tool_result_detail_level: str = "hybrid"
+
     # Model
     model_name: str = "gpt-5-mini"
     model_api_base: Optional[str] = None

@@ -375,6 +375,29 @@ class BaseRepoQAAgent(DefaultAgent):
         logger.warning("🚫 SUBMISSION REJECTED: insufficient evidence")
         return self._build_submit_reject_feedback()
 
+    def _compact_observation_preview(self, text: str, max_len: int = 180) -> str:
+        """压缩 observation 长尾，优先保留结构标签与首条关键信息。"""
+        raw = (text or "").strip()
+        if not raw:
+            return ""
+        lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+        if not lines:
+            return ""
+
+        keep = []
+        for ln in lines:
+            if ln.startswith("[") or ln.startswith("⚠️") or ln.startswith("✅"):
+                keep.append(ln)
+            if len(keep) >= 2:
+                break
+        if not keep:
+            keep = [lines[0]]
+
+        preview = " | ".join(keep)
+        if len(preview) > max_len:
+            preview = preview[: max_len - 3] + "..."
+        return preview
+
     def get_observation(self, response: dict) -> dict:
         """适配观察值处理 + 终止检测"""
         obs_dict = super().get_observation(response)
@@ -388,7 +411,7 @@ class BaseRepoQAAgent(DefaultAgent):
 
         step = max(0, (len(getattr(self, "messages", [])) - 2) // 2)
         action_preview = (obs_dict.get("action", "N/A") or "N/A")[:88]
-        output_preview = (raw_output or "").replace(chr(10), " ")[:140]
+        output_preview = self._compact_observation_preview(raw_output)
         logger.info(f"📍S{step:02d} | rc={obs_dict.get('returncode', 'N/A')} | action={action_preview}")
         logger.info(f"   ↳ {output_preview}")
 

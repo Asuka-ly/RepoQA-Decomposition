@@ -11,6 +11,7 @@ def _mk_agent(enable_graph_tools=True, enable_dynamic_graph_tool_calls=True, dec
         graph_tool_stagnation_steps=2,
         decompose_on_start=decompose_on_start,
         enable_decomposition_tool=enable_decomposition_tool,
+        tool_result_detail_level="hybrid",
     )
     agent.graph_tools = object()
     agent.decomposition = None
@@ -90,7 +91,8 @@ def test_manual_tool_call_retrieve_updates_unresolved_cooldown():
     agent.unresolved_symbol_cooldown = {}
     out = agent._handle_tool_call_command('TOOL_CALL GRAPH_RETRIEVE {"symbols":["foo"]}')
     assert out["returncode"] == 0
-    assert "[TOOL_RESULT]" in out["output"]
+    assert "[TOOL] GRAPH_RETRIEVE" in out["output"]
+    assert "[TOOL_DETAIL_JSON]" in out["output"]
     assert agent.unresolved_symbol_cooldown.get("foo") is not None
 
 
@@ -100,3 +102,14 @@ def test_base_tool_call_command_parser():
     agent = BaseRepoQAAgent.__new__(BaseRepoQAAgent)
     assert agent._is_tool_call_command('TOOL_CALL GRAPH_RETRIEVE {"symbols":["x"]}') is True
     assert agent._is_tool_call_command('rg -n x foo.py') is False
+
+
+def test_tool_result_summary_mode_strips_detail_json():
+    agent = _mk_agent()
+    agent.exp_config.tool_result_detail_level = "summary"
+    agent.tool_registry = SimpleNamespace(invoke=lambda **kwargs: {"results": {"foo": [{"file": "a.py", "line": 1}]}, "grounded": 1, "retrieval_mode": "ast_only"})
+    agent.graph_tools = SimpleNamespace()
+    agent.unresolved_symbol_cooldown = {}
+    out = agent._handle_tool_call_command('TOOL_CALL GRAPH_RETRIEVE {"symbols":["foo"]}')
+    assert "[TOOL] GRAPH_RETRIEVE" in out["output"]
+    assert "[TOOL_DETAIL_JSON]" not in out["output"]

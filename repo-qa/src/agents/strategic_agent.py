@@ -51,6 +51,69 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
         self.unresolved_symbol_cooldown = {}
         self._pending_replan_suggestion = ""
 
+    def _format_tool_result(self, tool: str, payload: dict, detail: dict | None = None) -> str:
+        """统一工具结果展示：兼顾可读性与上下文完整性。"""
+        detail_level = getattr(self.exp_config, "tool_result_detail_level", "hybrid")
+        if tool == "DECOMPOSE_WITH_GRAPH":
+            summary = (
+                f"[TOOL] {tool} ok={payload.get('ok', False)} "
+                f"subq={payload.get('subq_count', 0)}"
+            )
+        elif tool == "GRAPH_RETRIEVE":
+            unresolved = payload.get("unresolved_symbols", []) or []
+            summary = (
+                f"[TOOL] {tool} grounded={payload.get('grounded', 0)} "
+                f"mode={payload.get('retrieval_mode', 'unknown')} "
+                f"unresolved={len(unresolved)}"
+            )
+        elif tool == "GRAPH_VALIDATE":
+            summary = (
+                f"[TOOL] {tool} coverage={payload.get('grounding_coverage', 0.0)} "
+                f"exec={payload.get('executable_entry_rate', 0.0)}"
+            )
+        else:
+            summary = f"[TOOL] {tool}"
+
+        if detail_level == "summary" or not detail:
+            return summary
+
+        if detail_level == "full":
+            return summary + "\n[TOOL_DETAIL_JSON] " + json.dumps(detail, ensure_ascii=False)
+
+        # hybrid: 仅保留关键结构，避免长尾
+        compact = dict(detail)
+        if tool == "GRAPH_RETRIEVE":
+            results = compact.get("results", {}) if isinstance(compact.get("results", {}), dict) else {}
+            compact["results"] = {
+                sym: [
+                    {
+                        "file": item.get("file"),
+                        "line": item.get("line"),
+                        "qname": item.get("qname"),
+                        "type": item.get("type"),
+                    }
+                    for item in (items or [])[:2]
+                ]
+                for sym, items in list(results.items())[:6]
+            }
+        return summary + "\n[TOOL_DETAIL_JSON] " + json.dumps(compact, ensure_ascii=False)
+
+    def _build_sq_dashboard(self) -> str:
+        """战略状态可视化：每步输出紧凑 dashboard。"""
+        subq = getattr(self.subq_manager, "sub_questions", []) or []
+        if not subq:
+            return "[SQ] total=0"
+        total = len(subq)
+        satisfied = sum(1 for x in subq if x.get("status") == "satisfied")
+        blocked = sum(1 for x in subq if x.get("status") == "blocked")
+        in_progress = sum(1 for x in subq if x.get("status") in {"in_progress", "open"})
+        top = sorted(subq, key=lambda x: float(x.get("progress", 0.0)))[:2]
+        top_ids = ",".join(f"{x.get('id','SQ?')}:{x.get('status','?')}" for x in top)
+        return (
+            f"[SQ] total={total} sat={satisfied} prog={in_progress} blocked={blocked} "
+            f"stagnation={self.subq_manager.no_new_evidence_steps} focus={top_ids}"
+        )
+
     def _run_decompose_tool(self, task: str, step: int = 0, reason: str = "initial") -> bool:
         """调用 DECOMPOSE_WITH_GRAPH 工具。
 
@@ -109,7 +172,7 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
                 "ok": bool(ok),
                 "subq_count": len(getattr(self.subq_manager, "sub_questions", []) or []),
             }
-            return {"output": "[TOOL_RESULT] " + json.dumps(payload, ensure_ascii=False), "returncode": 0}
+            return {"output": self._format_tool_result(tool, payload, detail=payload), "returncode": 0}
 
         if tool == "GRAPH_RETRIEVE":
             symbols = [str(x) for x in args.get("symbols", []) if str(x).strip()]
@@ -130,7 +193,7 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
                 "retrieval_mode": result.get("retrieval_mode", "unknown"),
                 "unresolved_symbols": unresolved,
             }
-            return {"output": "[TOOL_RESULT] " + json.dumps(payload, ensure_ascii=False), "returncode": 0}
+            return {"output": self._format_tool_result(tool, payload, detail=result), "returncode": 0}
 
         if tool == "GRAPH_VALIDATE":
             sub_questions = args.get("sub_questions") or (getattr(self.subq_manager, "sub_questions", []) or [])[:3]
@@ -146,7 +209,7 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
                 "grounding_coverage": result.get("grounding_coverage", 0.0),
                 "executable_entry_rate": result.get("executable_entry_rate", 0.0),
             }
-            return {"output": "[TOOL_RESULT] " + json.dumps(payload, ensure_ascii=False), "returncode": 0}
+            return {"output": self._format_tool_result(tool, payload, detail=result), "returncode": 0}
 
         return {"output": f"Tool call blocked: unknown tool `{tool}`.", "returncode": 0}
 
@@ -171,9 +234,10 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
         enhanced_task = build_task_prompt(task, repo_path, self.decomposition, self.exp_config)
         enhanced_task += (
             "\n\nTOOL CALL PROTOCOL (UNIFIED):"
-            "\n- Use one bash line: TOOL_CALL <TOOL_NAME> <JSON_ARGS>."
-            "\n- Supported: DECOMPOSE_WITH_GRAPH, GRAPH_RETRIEVE, GRAPH_VALIDATE."
+            "\n- In bash block, use: TOOL_CALL <TOOL_NAME> <JSON_ARGS>."
+            "\n- Tools: DECOMPOSE_WITH_GRAPH / GRAPH_RETRIEVE / GRAPH_VALIDATE."
             "\n- Example: TOOL_CALL GRAPH_RETRIEVE {\"symbols\":[\"parse_action\"]}."
+            "\n- Use TOOL_CALL when you need planning/graph context; use rg/nl/sed for code reading."
         )
 
 
@@ -412,6 +476,11 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
                 self._pending_replan_suggestion = f"TOOL_CALL DECOMPOSE_WITH_GRAPH {payload}"
                 obs_dict["observation"] += "\n[REPLAN ACTION] " + self._pending_replan_suggestion
                 obs_dict["output"] = obs_dict["observation"]
+
+            dashboard = self._build_sq_dashboard()
+            obs_dict["observation"] += "\n" + dashboard
+            obs_dict["output"] = obs_dict["observation"]
+            logger.info("   " + dashboard)
 
         return obs_dict
 
