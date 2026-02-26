@@ -47,6 +47,34 @@ SWE-QA-Bench 数据接入（用于后续实验/评估）：
 完整在线测试手册（依赖安装/API 配置/批量测试/排查）：
 - `docs/stage1_online_test_playbook.md`
 
+可选网络参数（若环境必须走代理）：
+- `python scripts/run_single.py --keep-proxy`
+- `python scripts/run_ablation.py --keep-proxy`
+
+离线模式（不调用外部 API）：
+- `python scripts/run_single.py --offline --question-file q3_default_agent_action_flow.txt`
+- `python scripts/run_ablation.py --offline --question-file q4_message_history_flow.txt`
+
+轨迹质量检查：
+- `python scripts/analyze_trajectory.py --config baseline`
+- trajectory 会记录 `trajectory_schema_version` 与 `tool_calls`（工具调用轨迹）
+
+批量测试（一次跑完 q1~q4）：
+- `python scripts/run_batch.py --mode ablation --all-questions`
+- `python scripts/run_batch.py --mode both --all-questions`
+
+离线冒烟实验（无外部 API）：
+- `python scripts/run_offline_smoke.py`
+
+SWE-QA-Bench 数据接入（用于后续实验/评估）：
+- `python scripts/fetch_swe_qa_bench.py --max-questions 200`
+- 复用已下载目录：`python scripts/fetch_swe_qa_bench.py --skip-clone --target-dir data/external/SWE-QA-Bench`
+- 默认会把题目抽取到 `data/questions/swe_qa_bench/`，并生成索引 `index.jsonl`
+- 运行示例：`python scripts/run_single.py --question-file swe_qa_bench/swe_qa_0001.txt`
+
+完整在线测试手册（依赖安装/API 配置/批量测试/排查）：
+- `docs/stage1_online_test_playbook.md`
+
 ## 投稿计划
 - COLM 2025 (Deadline: 3.27)
 - NeurIPS 2025 (Deadline: 5月)
