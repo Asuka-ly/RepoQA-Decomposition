@@ -11,7 +11,8 @@ cd repo-qa
 bash setup.sh --yes
 pip install -r requirements.txt
 # 配置 .env: OPENAI_API_KEY / OPENAI_API_BASE
-python scripts/run_batch.py --mode ablation --all-questions
+python scripts/fetch_swe_qa_bench.py --max-questions 200
+python scripts/run_batch.py --mode single --question-source swe_qa --all-questions
 ```
 
 
@@ -76,3 +77,20 @@ python scripts/analyze_trajectory.py --config vanilla
 - [ ] analyzer 能正确输出 evidence_ref_count
 - [ ] trajectory 中存在 decomposition_action 字段
 - [ ] 至少一个问题触发有效 sub-question 更新
+
+
+## 7. 当前版本自我评审结论（2026-02）
+
+### 已确认修复
+- Question-Repo 解耦问题已修复：`fetch_swe_qa_bench.py` 保留 `repo/commit/instance_id`，`run_single.py` 根据题目索引动态切仓并 checkout 绑定 commit。
+- `run_batch.py` 已支持 `--question-source swe_qa|stage1|auto`，默认对齐 SWE-QA 使用场景。
+- 离线冒烟脚本在当前 submit gate 约束下已更新并验证 strategic/vanilla 均可完成提交。
+
+### 仍需持续观察
+- 大规模批跑时的仓库缓存大小增长（`data/external/repo_cache`）。
+- 远程 clone/fetch 异常时的自动重试和错误聚合（当前已可报错，但仍建议补重试策略）。
+
+### 交接优先事项（建议）
+1. 先跑 `fetch_swe_qa_bench.py`，确认 index 里 repo/commit 覆盖率。
+2. 再跑 `run_batch.py --question-source swe_qa`，确保轨迹 target repo 与题目绑定一致。
+3. 周期性清理/复用 repo cache，避免磁盘膨胀影响批次稳定性。
