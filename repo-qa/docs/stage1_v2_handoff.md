@@ -1,96 +1,41 @@
-# Stage1 v2.0 交接文档（面向协作开发与实验复现）
+# Stage1 v2 交接说明（精简）
 
-## 0. 环境与测试（补全）
+## 架构关键点
+- 题目来源切换到 SWE-QA 绑定路径：`fetch -> index -> run_single/run_batch`。
+- 题目索引持久化 `repo/commit/instance_id`，执行时按绑定仓库与提交运行。
+- 批量入口统一 `--question-source swe_qa|stage1|auto`，默认推荐 `swe_qa`。
 
-> 你提到的缺口（依赖下载/API 配置/测试命令）已补齐到独立操作手册：`docs/stage1_online_test_playbook.md`。
+## 已修复问题
+- 题目与目标仓库错配：已通过题目索引绑定解决。
+- run_batch 题源固化：已支持多来源显式切换。
+- offline smoke 在当前 submit gate 约束下可稳定跑完 strategic/vanilla。
 
-快速入口：
+## 未解决问题
+- 大规模批量时仓库缓存膨胀与网络失败重试策略需持续观察。
+- 在线环境对代理/API 质量敏感，可能出现间歇性失败。
 
+## 接手优先级
+1. 保持 SWE-QA 主路径稳定，避免回到“固定 repo 跑题”。
+2. 维护最小验证集合，优先保证核心链路可复现。
+3. 控制文档和日志体积，新增内容必须有替代价值。
+
+## 最小命令模板
 ```bash
-cd repo-qa
-bash setup.sh --yes
-pip install -r requirements.txt
-# 配置 .env: OPENAI_API_KEY / OPENAI_API_BASE
+# SWE-QA 主路径
 python scripts/fetch_swe_qa_bench.py --max-questions 200
+python scripts/run_single.py --question-file swe_qa_bench/swe_qa_0001.txt
 python scripts/run_batch.py --mode single --question-source swe_qa --all-questions
+
+# stage1 回退路径
+python scripts/run_batch.py --mode single --question-source stage1 --all-questions
 ```
 
-
-## 1. 给协作者（如 pwh）的快速入口
-
-### 代码入口
-- Agent 主流程：`src/agents/strategic_agent.py`
-- 分解 Action：`src/decomposition_action.py`
-- 分解器：`src/decomposer.py`
-- 子问题状态：`src/subquestion_manager.py`
-- 提交门槛：`src/agents/base.py`
-- 轨迹分析：`scripts/analyze_trajectory.py`
-
-### 核心新增（v2.x）
-- 独立分解 Action `DECOMPOSE_WITH_GRAPH`。
-- 分解质量分 `decomposition_quality`。
-- 轨迹新增 `decomposition_action` 字段。
-- P0/P1：新增 `ToolRegistry` 与 `tool_calls`（trajectory schema v2 最小版）。
-
-## 2. 如何跑实验（最小命令）
-
-```bash
-# 单题（baseline）
-python scripts/run_single.py --question-file q2_config_loading.txt
-
-# 消融（baseline vs vanilla）
-python scripts/run_ablation.py --question-file q4_message_history_flow.txt
-
-# 轨迹分析
-python scripts/analyze_trajectory.py --config baseline
-python scripts/analyze_trajectory.py --config vanilla
-```
-
-## 3. 关键输出解释
-
-- `statistics.decomposition_quality`：分解先验质量（0~1）。
-- `decomposition_action.decomposition.action_metadata.contract_version`：分解契约版本（当前 stage1_v2.2）。
-- `decomposition_action.quality`：质量明细（prior + posterior 占位）。
-- `decomposition_action.decomposition.plan_order`：子问题执行顺序。
-- `decomposition_action.decomposition.evidence_requirements`：每个子问题证据要求。
-- `decomposition_action.decomposition.replan_triggers`：建议重规划触发器。
-- `subquestion_trace`：在线状态更新和重规划事件。
-- `tool_calls`：统一工具调用明细（name/reason/success/latency）。
-- `statistics.graph_tool_calls`：图工具调用次数（用于评估图融合深度）。
-- `quality_flags.missing_evidence_refs`：答案与轨迹证据都不足时为 true。
-
-## 4. 协作分工建议
-
-- A（算法/规划）：优化 decomposition quality 与 replan 策略。
-- B（系统/工具）：图工具化（检索/验证接口）与 runner 稳定性。
-- C（评测/数据）：构造问题集，维护 ablation 报告模板与轨迹对齐检查。
-
-## 5. 当前风险与排查
-
-1. 分解质量高但执行差：检查 entry_candidates 是否过泛。
-2. 长答案无证据：检查 submit gate 是否命中 evidence 检查。
-3. subq 满足率虚高：检查 evidence 是否被错误共享（targeted 逻辑）。
-
-## 6. 建议的交接检查清单
-
-- [ ] baseline/vanilla 各跑 1 次并保存轨迹
-- [ ] analyzer 能正确输出 evidence_ref_count
-- [ ] trajectory 中存在 decomposition_action 字段
-- [ ] 至少一个问题触发有效 sub-question 更新
-
-
-## 7. 当前版本自我评审结论（2026-02）
-
-### 已确认修复
-- Question-Repo 解耦问题已修复：`fetch_swe_qa_bench.py` 保留 `repo/commit/instance_id`，`run_single.py` 根据题目索引动态切仓并 checkout 绑定 commit。
-- `run_batch.py` 已支持 `--question-source swe_qa|stage1|auto`，默认对齐 SWE-QA 使用场景。
-- 离线冒烟脚本在当前 submit gate 约束下已更新并验证 strategic/vanilla 均可完成提交。
-
-### 仍需持续观察
-- 大规模批跑时的仓库缓存大小增长（`data/external/repo_cache`）。
-- 远程 clone/fetch 异常时的自动重试和错误聚合（当前已可报错，但仍建议补重试策略）。
-
-### 交接优先事项（建议）
-1. 先跑 `fetch_swe_qa_bench.py`，确认 index 里 repo/commit 覆盖率。
-2. 再跑 `run_batch.py --question-source swe_qa`，确保轨迹 target repo 与题目绑定一致。
-3. 周期性清理/复用 repo cache，避免磁盘膨胀影响批次稳定性。
+## 交接 Checklist（<=8）
+- [ ] 确认 `data/questions/swe_qa_bench/index.jsonl` 存在且含 repo/commit 字段。
+- [ ] run_single 首题可按绑定仓库执行。
+- [ ] run_batch 在 `swe_qa` 题源可批量启动。
+- [ ] run_batch 在 `stage1` 题源可回退执行。
+- [ ] 最小测试集通过（batch/binding/offline smoke）。
+- [ ] offline smoke 成功结束。
+- [ ] README 与任务书命令保持一致。
+- [ ] 新增文档前先删除冗余段落。

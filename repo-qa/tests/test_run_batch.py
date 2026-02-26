@@ -20,6 +20,8 @@ def test_resolve_question_files_from_swe_index(tmp_path):
     questions_dir = tmp_path / "questions"
     swe_dir = questions_dir / "swe_qa_bench"
     swe_dir.mkdir(parents=True)
+    (swe_dir / "swe_qa_0001.txt").write_text("q1\n", encoding="utf-8")
+    (swe_dir / "swe_qa_0002.txt").write_text("q2\n", encoding="utf-8")
     index = swe_dir / "index.jsonl"
     index.write_text(
         "\n".join(
@@ -32,6 +34,30 @@ def test_resolve_question_files_from_swe_index(tmp_path):
     )
 
     files = resolve_question_files("", all_questions=False, source="swe_qa", questions_dir=questions_dir)
+    assert files == ["swe_qa_bench/swe_qa_0001.txt", "swe_qa_bench/swe_qa_0002.txt"]
+
+
+def test_resolve_question_files_from_swe_index_skips_invalid_and_normalizes(tmp_path):
+    questions_dir = tmp_path / "questions"
+    swe_dir = questions_dir / "swe_qa_bench"
+    swe_dir.mkdir(parents=True)
+    (swe_dir / "swe_qa_0001.txt").write_text("q1\n", encoding="utf-8")
+    (swe_dir / "swe_qa_0002.txt").write_text("q2\n", encoding="utf-8")
+    index = swe_dir / "index.jsonl"
+    index.write_text(
+        "\n".join(
+            [
+                "{broken-json}",
+                json.dumps({"question_file": "swe_qa_0001.txt"}),
+                json.dumps({"question_file": "swe_qa_bench/swe_qa_0001.txt"}),
+                json.dumps({"question_file": "swe_qa_bench/swe_qa_0002.txt"}),
+                json.dumps({"question_file": "swe_qa_bench/not_exists.txt"}),
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    files = resolve_question_files("", all_questions=True, source="swe_qa", questions_dir=questions_dir)
     assert files == ["swe_qa_bench/swe_qa_0001.txt", "swe_qa_bench/swe_qa_0002.txt"]
 
 

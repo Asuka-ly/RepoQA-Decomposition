@@ -43,8 +43,19 @@ def test_collect_questions_from_nested_json(tmp_path: Path):
         json.dumps(
             {
                 "data": [
-                    {"meta": {"query": "Q1 nested query"}},
-                    {"instruction": "Q2 instruction"},
+                    {
+                        "meta": {
+                            "query": "Q1 nested query",
+                            "repo": "pallets/flask",
+                            "base_commit": "abc",
+                            "instance_id": "x-1",
+                        }
+                    },
+                    {
+                        "instruction": "Q2 instruction",
+                        "repository": "psf/requests",
+                        "commit_hash": "def",
+                    },
                 ]
             }
         ),
@@ -54,14 +65,30 @@ def test_collect_questions_from_nested_json(tmp_path: Path):
     qs = collect_questions(repo, max_questions=10)
     assert len(qs) == 2
     assert "nested query" in qs[0]["question"]
+    assert qs[0]["repo"] == "pallets/flask"
+    assert qs[1]["commit"] == "def"
 
 
-def test_collect_questions_from_markdown_fallback(tmp_path: Path):
+def test_collect_questions_skip_records_without_binding(tmp_path: Path):
     repo = tmp_path / "dataset"
     repo.mkdir()
-    md = repo / "README.md"
-    md.write_text("Some intro\nWhat is timeout behavior?\nNot a question\n", encoding="utf-8")
+    data_file = repo / "qa_dataset.jsonl"
+    data_file.write_text(
+        "\n".join(
+            [
+                json.dumps({"question": "What is timeout behavior?"}),
+                json.dumps(
+                    {
+                        "question": "How parse action works?",
+                        "repo": "pallets/flask",
+                        "commit": "abc",
+                    }
+                ),
+            ]
+        ),
+        encoding="utf-8",
+    )
 
     qs = collect_questions(repo, max_questions=10)
     assert len(qs) == 1
-    assert "timeout" in qs[0]["question"].lower()
+    assert qs[0]["repo"] == "pallets/flask"

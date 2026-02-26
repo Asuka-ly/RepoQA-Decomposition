@@ -43,20 +43,44 @@ def _resolve_source(question_source: str, questions_dir: Path) -> str:
     return "swe_qa" if index.exists() else "stage1"
 
 
+def _normalize_question_file(questions_dir: Path, question_file: str) -> str | None:
+    qf = (question_file or "").strip()
+    if not qf:
+        return None
+
+    qf_path = Path(qf)
+    if qf_path.is_absolute():
+        return str(qf_path) if qf_path.exists() else None
+
+    # 兼容 index 里写成 "swe_qa_0001.txt" 的情况
+    if (questions_dir / qf_path).exists():
+        return qf_path.as_posix()
+    if (questions_dir / "swe_qa_bench" / qf_path.name).exists():
+        return f"swe_qa_bench/{qf_path.name}"
+    return None
+
+
 def _all_swe_qa_files(questions_dir: Path) -> List[str]:
     index = questions_dir / "swe_qa_bench" / "index.jsonl"
     if not index.exists():
         return []
 
     files: List[str] = []
+    seen: set[str] = set()
     for line in index.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
             continue
-        row = json.loads(line)
-        qf = row.get("question_file")
-        if qf:
-            files.append(qf)
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(row, dict):
+            continue
+        normalized = _normalize_question_file(questions_dir, row.get("question_file", ""))
+        if normalized and normalized not in seen:
+            files.append(normalized)
+            seen.add(normalized)
     return files
 
 
