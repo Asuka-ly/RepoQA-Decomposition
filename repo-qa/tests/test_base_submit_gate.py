@@ -40,7 +40,7 @@ def test_can_submit_vanilla_passes_with_evidence_ref_and_steps():
             {"role": "user", "content": "obs"},
             {"role": "assistant", "content": "mid"},
             {"role": "user", "content": "obs2"},
-            {"role": "assistant", "content": "mid2"},
+            {"role": "assistant", "content": "mid2 agents/default.py:140 agents/default.py:141"},
             {"role": "assistant", "content": "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"},
         ],
         viewed_files={"agents/default.py"},
@@ -67,7 +67,7 @@ def test_can_submit_strategic_needs_satisfied_and_evidence():
             {"role": "user", "content": "obs2"},
             {"role": "assistant", "content": "final"},
             {"role": "user", "content": "obs3"},
-            {"role": "assistant", "content": "note"},
+            {"role": "assistant", "content": "note b.py:20 b.py:21"},
             {"role": "user", "content": "obs4"},
         ],
         viewed_files={"a.py", "b.py"},
@@ -130,6 +130,7 @@ def test_broad_scan_rewrite_hint_uses_graph_templates():
 class _CfgSubmitGuard:
     min_submit_total_evidence = 2
     min_submit_assistant_evidence = 2
+    min_submit_final_answer_refs = 2
     min_submit_steps = 4
     max_consecutive_submit_blocks = 2
 
@@ -150,3 +151,33 @@ def test_submit_reject_feedback_contains_actionable_gaps():
     assert "[SUBMIT_GATE] blocked" in text
     assert "unmet" in text
     assert "loop_guard=" in text
+
+
+def test_can_submit_blocks_when_latest_answer_has_no_refs():
+    agent = _mk_agent(
+        messages=[
+            {"role": "system", "content": "x"},
+            {"role": "user", "content": "question"},
+            {"role": "assistant", "content": "a.py:10"},
+            {"role": "user", "content": "obs1"},
+            {"role": "assistant", "content": "b.py:20"},
+            {"role": "user", "content": "obs2"},
+            {"role": "assistant", "content": "I think we are done"},
+        ],
+        viewed_files={"a.py"},
+        subq=None,
+    )
+    assert agent._can_submit() is False
+
+
+def test_extract_final_answer_rejects_submit_only_text():
+    agent = _mk_agent(
+        messages=[
+            {"role": "assistant", "content": "Per rules I will submit now\n\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"},
+            {"role": "assistant", "content": "## FINAL ANSWER\nFound at agents/default.py:116 and agents/default.py:131"},
+        ],
+        viewed_files={"agents/default.py"},
+        subq=None,
+    )
+    final = agent._extract_final_answer()
+    assert "agents/default.py:116" in final

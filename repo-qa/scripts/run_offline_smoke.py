@@ -1,9 +1,4 @@
-"""离线冒烟实验：不依赖外部 API，验证 Stage1 管线与轨迹产物。
-
-该脚本使用 mini-swe-agent 的 DeterministicModel，覆盖：
-- strategic (含 decomposition + graph + subquestion trace)
-- vanilla (对照组)
-"""
+"""离线冒烟实验：不依赖外部 API，验证 Stage1 管线与轨迹产物。"""
 
 import json
 import sys
@@ -27,7 +22,6 @@ def _agent_cfg():
 
 
 def _strategic_outputs(repo_path: str):
-    # 第一个输出供 decomposer 使用；后续输出供 DefaultAgent 循环使用
     decomp_json = {
         "sub_questions": [
             {
@@ -35,7 +29,7 @@ def _strategic_outputs(repo_path: str):
                 "sub_question": "How does DefaultAgent parse and execute actions?",
                 "hypothesis": "Action parsing happens before command execution",
                 "entry_candidates": ["agents/default.py::DefaultAgent.parse_action"],
-                "symbols": ["DefaultAgent", "parse_action"],
+                "symbols": ["DefaultAgent", "parse_action", "execute_action"],
                 "required_evidence": ["definition location", "call path"],
                 "exit_criterion": "2 grounded evidence items",
                 "status": "open",
@@ -48,14 +42,14 @@ def _strategic_outputs(repo_path: str):
     }
     return [
         json.dumps(decomp_json),
-        f"Read agent entry\n```bash\ncd {repo_path} && rg \"class DefaultAgent\" agents/default.py\n```",
-        f"Read parse_action\n```bash\ncd {repo_path} && nl -ba agents/default.py | sed -n '120,220p'\n```",
-        f"Read run loop\n```bash\ncd {repo_path} && nl -ba agents/default.py | sed -n '190,260p'\n```",
+        f"Read class anchor\n```bash\ncd {repo_path} && rg -n 'class DefaultAgent' agents/default.py\n```",
+        f"Read parse_action symbol\n```bash\ncd {repo_path} && rg -n 'def parse_action' agents/default.py\n```",
+        f"Read execute_action symbol\n```bash\ncd {repo_path} && rg -n 'def execute_action' agents/default.py\n```",
+        f"Read call path context\n```bash\ncd {repo_path} && nl -ba agents/default.py | sed -n '110,280p'\n```",
         (
             "## FINAL ANSWER\n"
-            "`DefaultAgent.parse_action` validates exactly one bash code block in "
-            "`src/minisweagent/agents/default.py:138`, then the run loop executes parsed action and records observation near "
-            "`src/minisweagent/agents/default.py:246`."
+            "`DefaultAgent.parse_action` is defined at `agents/default.py:116`, validates a single bash code block near "
+            "`agents/default.py:138`, and the action execution path is implemented in `agents/default.py:246`."
             "\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\n```"
         ),
     ]
@@ -64,10 +58,13 @@ def _strategic_outputs(repo_path: str):
 def _vanilla_outputs(repo_path: str):
     return [
         f"Explore files\n```bash\ncd {repo_path} && ls\n```",
-        f"Inspect default agent\n```bash\ncd {repo_path} && nl -ba agents/default.py | sed -n '120,220p'\n```",
+        f"Inspect parse_action symbol\n```bash\ncd {repo_path} && rg -n 'def parse_action' agents/default.py\n```",
+        f"Inspect execute path\n```bash\ncd {repo_path} && rg -n 'def execute_action' agents/default.py\n```",
+        f"Inspect default agent body\n```bash\ncd {repo_path} && nl -ba agents/default.py | sed -n '120,260p'\n```",
         (
             "## FINAL ANSWER\n"
-            "Action parsing constraints appear in `src/minisweagent/agents/default.py:138`."
+            "Action parsing constraints appear in `agents/default.py:116` and `agents/default.py:138`, with execution flow in "
+            "`agents/default.py:246`."
             "\n```bash\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\n```"
         ),
     ]

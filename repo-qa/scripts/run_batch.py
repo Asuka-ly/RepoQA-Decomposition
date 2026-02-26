@@ -1,4 +1,4 @@
-"""批量运行脚本：支持一次性跑完多题（默认 q1~q4）。"""
+"""批量运行脚本：支持 Stage1 与 SWE-QA 问题集。"""
 from __future__ import annotations
 
 import argparse
@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import List
 
 
-DEFAULT_QUESTION_FILES = [
+DEFAULT_STAGE1_QUESTION_FILES = [
     "q1_timeout_exception.txt",
     "q2_config_loading.txt",
     "q3_default_agent_action_flow.txt",
@@ -20,21 +20,14 @@ DEFAULT_QUESTION_FILES = [
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run RepoQA experiments in batch")
+    parser.add_argument("--mode", choices=["single", "ablation", "both"], default="ablation")
+    parser.add_argument("--question-files", default="", help="Comma separated question files")
+    parser.add_argument("--all-questions", action="store_true", help="Run all questions of selected source")
     parser.add_argument(
-        "--mode",
-        choices=["single", "ablation", "both"],
-        default="ablation",
-        help="Run run_single.py, run_ablation.py or both for each question",
-    )
-    parser.add_argument(
-        "--question-files",
-        default="",
-        help="Comma separated question files in data/questions (e.g. q1.txt,q2.txt)",
-    )
-    parser.add_argument(
-        "--all-questions",
-        action="store_true",
-        help="Run all built-in Stage1 questions (q1~q4)",
+        "--question-source",
+        choices=["swe_qa", "stage1", "auto"],
+        default="swe_qa",
+        help="Question source. auto: prefer swe_qa if available, otherwise stage1.",
     )
     parser.add_argument("--config", default="baseline", help="Config used by run_single.py")
     parser.add_argument("--repo-path", default=None, help="Override target repository path")
@@ -43,16 +36,45 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def resolve_question_files(question_files_arg: str, all_questions: bool) -> List[str]:
-    if all_questions:
-        return list(DEFAULT_QUESTION_FILES)
+def _resolve_source(question_source: str, questions_dir: Path) -> str:
+    if question_source in {"swe_qa", "stage1"}:
+        return question_source
+    index = questions_dir / "swe_qa_bench" / "index.jsonl"
+    return "swe_qa" if index.exists() else "stage1"
 
+
+def _all_swe_qa_files(questions_dir: Path) -> List[str]:
+    index = questions_dir / "swe_qa_bench" / "index.jsonl"
+    if not index.exists():
+        return []
+
+    files: List[str] = []
+    for line in index.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        row = json.loads(line)
+        qf = row.get("question_file")
+        if qf:
+            files.append(qf)
+    return files
+
+
+def resolve_question_files(question_files_arg: str, all_questions: bool, source: str = "stage1", questions_dir: Path | None = None) -> List[str]:
     if question_files_arg.strip():
         items = [x.strip() for x in question_files_arg.split(",") if x.strip()]
         if items:
             return items
 
-    return list(DEFAULT_QUESTION_FILES)
+    if source == "swe_qa":
+        if questions_dir is None:
+            return []
+        files = _all_swe_qa_files(questions_dir)
+        if all_questions:
+            return files
+        return files[: min(10, len(files))]
+
+    return list(DEFAULT_STAGE1_QUESTION_FILES)
 
 
 def _build_command(script_name: str, args: argparse.Namespace, question_file: str) -> List[str]:
@@ -73,7 +95,6 @@ def _run_one(script_name: str, args: argparse.Namespace, question_file: str) -> 
     started = datetime.now()
     proc = subprocess.run(cmd, capture_output=True, text=True)
     duration = (datetime.now() - started).total_seconds()
-
     return {
         "script": script_name,
         "question_file": question_file,
@@ -86,13 +107,25 @@ def _run_one(script_name: str, args: argparse.Namespace, question_file: str) -> 
     }
 
 
+def _question_exists(questions_dir: Path, qf: str) -> bool:
+    candidate = Path(qf)
+    if candidate.is_absolute():
+        return candidate.exists()
+    return (questions_dir / qf).exists()
+
+
 def main() -> int:
     args = parse_args()
     repo_root = Path(__file__).resolve().parent.parent
-    question_files = resolve_question_files(args.question_files, args.all_questions)
-
     questions_dir = repo_root / "data" / "questions"
-    missing = [q for q in question_files if not (questions_dir / q).exists()]
+
+    source = _resolve_source(args.question_source, questions_dir)
+    question_files = resolve_question_files(args.question_files, args.all_questions, source=source, questions_dir=questions_dir)
+    if not question_files:
+        print(f"❌ No questions resolved for source={source}. Please run fetch script first.")
+        return 2
+
+    missing = [q for q in question_files if not _question_exists(questions_dir, q)]
     if missing:
         print(f"❌ Missing question files: {missing}")
         return 2
@@ -104,7 +137,7 @@ def main() -> int:
         scripts.append("run_ablation.py")
 
     print("=" * 72)
-    print(f"🚀 Batch run start | mode={args.mode} | questions={len(question_files)}")
+    print(f"🚀 Batch run start | mode={args.mode} | source={source} | questions={len(question_files)}")
     print("=" * 72)
 
     results = []
@@ -125,6 +158,7 @@ def main() -> int:
     summary = {
         "timestamp": ts,
         "mode": args.mode,
+        "question_source": source,
         "questions": question_files,
         "offline": args.offline,
         "results": results,

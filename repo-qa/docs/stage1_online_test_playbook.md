@@ -131,19 +131,19 @@ python scripts/run_ablation.py --question-file q4_message_history_flow.txt
 #### 一次跑完 q1~q4 的消融（推荐）
 
 ```bash
-python scripts/run_batch.py --mode ablation --all-questions
+python scripts/run_batch.py --mode single --question-source swe_qa --all-questions
 ```
 
 #### 一次跑完 q1~q4 的 single + ablation
 
 ```bash
-python scripts/run_batch.py --mode both --all-questions
+python scripts/run_batch.py --mode both --question-source auto --all-questions
 ```
 
 #### 指定问题子集
 
 ```bash
-python scripts/run_batch.py --mode ablation --question-files q2_config_loading.txt,q4_message_history_flow.txt
+python scripts/run_batch.py --mode ablation --question-source stage1 --question-files q2_config_loading.txt,q4_message_history_flow.txt
 ```
 
 ---
@@ -184,7 +184,7 @@ python scripts/analyze_trajectory.py --config vanilla
 如 API 不稳定，先走离线验证链路：
 
 ```bash
-python scripts/run_batch.py --mode both --all-questions --offline
+python scripts/run_batch.py --mode both --question-source auto --all-questions --offline
 python scripts/run_offline_smoke.py
 ```
 
@@ -215,9 +215,25 @@ python -m py_compile src/decomposition_action.py src/subquestion_manager.py src/
 pytest -q tests/test_decomposition_action.py tests/test_subquestion_manager.py tests/test_graph_tools.py tests/test_run_batch.py
 
 # 在线批量测试
-python scripts/run_batch.py --mode ablation --all-questions
+python scripts/run_batch.py --mode single --question-source swe_qa --all-questions
 
 # 看结果
 python scripts/analyze_trajectory.py --config baseline
 python scripts/analyze_trajectory.py --config vanilla
+```
+
+
+## SWE-QA 绑定前置步骤
+
+在批量跑 SWE-QA 前，先生成带 repo/commit 绑定的题目索引：
+
+```bash
+python scripts/fetch_swe_qa_bench.py --max-questions 200
+```
+
+随后可直接运行：
+
+```bash
+python scripts/run_single.py --config baseline --question-file swe_qa_bench/swe_qa_0001.txt
+python scripts/run_batch.py --mode single --question-source swe_qa --all-questions
 ```

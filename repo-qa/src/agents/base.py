@@ -76,6 +76,11 @@ class BaseRepoQAAgent(DefaultAgent):
                 suggested = plan.get("commands", [])
                 if suggested:
                     first_cmd = suggested[0]
+                    if "<" in first_cmd or ">" in first_cmd:
+                        return {
+                            "output": plan.get("hint", "Broad-scan command blocked."),
+                            "returncode": 0,
+                        }
                     rewritten = original_execute(first_cmd, cwd, timeout=timeout)
                     rewritten_output = rewritten.get("output", "") if isinstance(rewritten, dict) else ""
                     return {
@@ -176,12 +181,7 @@ class BaseRepoQAAgent(DefaultAgent):
                 pass
 
         if not commands:
-            commands = [
-                'rg -n "<symbol>" <candidate_file.py>',
-                "nl -ba <candidate_file.py> | sed -n 'start,endp'",
-            ]
-            hints.append("Suggested commands:")
-            hints.extend([f"- {t}" for t in commands])
+            hints.append("No graph-grounded file candidates available yet. First run GRAPH_RETRIEVE with 1-2 concrete symbols from the question.")
 
         return {"hint": "\n".join(hints), "commands": commands}
 
@@ -213,6 +213,18 @@ class BaseRepoQAAgent(DefaultAgent):
                 refs.update(self._extract_evidence_refs(msg.get("content", "")))
         return len(refs)
 
+    def _latest_substantive_assistant_message(self) -> str:
+        for msg in reversed(getattr(self, "messages", [])):
+            if msg.get("role") != "assistant":
+                continue
+            content = (msg.get("content", "") or "").strip()
+            if not content:
+                continue
+            if "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" in content and len(content) < 100:
+                continue
+            return content
+        return ""
+
     def _can_submit(self) -> bool:
         """提交前门槛：避免过早提交，要求有覆盖度与可追溯证据。"""
         step_count = max(0, (len(getattr(self, "messages", [])) - 2) // 2)
@@ -224,7 +236,9 @@ class BaseRepoQAAgent(DefaultAgent):
         cfg = getattr(self, "exp_config", None)
         min_total_evidence = int(getattr(cfg, "min_submit_total_evidence", 2))
         min_assistant_evidence = int(getattr(cfg, "min_submit_assistant_evidence", 2))
+        min_final_refs = int(getattr(cfg, "min_submit_final_answer_refs", 2))
         min_steps = int(getattr(cfg, "min_submit_steps", 4))
+        final_answer_refs = len(self._extract_evidence_refs(self._latest_substantive_assistant_message()))
 
         # strategic 模式下按子问题规模设置最小浏览文件数；vanilla 至少读 1 个 .py
         min_viewed = 2 if total_subq >= 3 else 1
@@ -248,6 +262,8 @@ class BaseRepoQAAgent(DefaultAgent):
                 return False
             if assistant_evidence < max(min_satisfied, min_assistant_evidence):
                 return False
+            if final_answer_refs < min_final_refs:
+                return False
             if satisfied + progressed < min(total, min_satisfied + 1):
                 return False
 
@@ -257,6 +273,8 @@ class BaseRepoQAAgent(DefaultAgent):
         if collected_evidence < 1:
             return False
         if assistant_evidence < 1:
+            return False
+        if final_answer_refs < min_final_refs:
             return False
         return step_count >= min_steps
 
@@ -270,7 +288,9 @@ class BaseRepoQAAgent(DefaultAgent):
         cfg = getattr(self, "exp_config", None)
         min_total_evidence = int(getattr(cfg, "min_submit_total_evidence", 2))
         min_assistant_evidence = int(getattr(cfg, "min_submit_assistant_evidence", 2))
+        min_final_refs = int(getattr(cfg, "min_submit_final_answer_refs", 2))
         min_steps = int(getattr(cfg, "min_submit_steps", 4))
+        final_answer_refs = len(self._extract_evidence_refs(self._latest_substantive_assistant_message()))
         min_viewed = 2 if total_subq >= 3 else 1
         snap = {
             "step_count": step_count,
@@ -281,6 +301,8 @@ class BaseRepoQAAgent(DefaultAgent):
             "min_total_evidence": min_total_evidence,
             "assistant_evidence": assistant_evidence,
             "min_assistant_evidence": min_assistant_evidence,
+            "final_answer_refs": final_answer_refs,
+            "min_final_answer_refs": min_final_refs,
             "unmet": [],
         }
         if len(self.viewed_files) < min_viewed:
@@ -289,6 +311,8 @@ class BaseRepoQAAgent(DefaultAgent):
             snap["unmet"].append(f"total_evidence<{min_total_evidence}")
         if assistant_evidence < min_assistant_evidence:
             snap["unmet"].append(f"assistant_evidence<{min_assistant_evidence}")
+        if final_answer_refs < min_final_refs:
+            snap["unmet"].append(f"final_answer_refs<{min_final_refs}")
         if step_count < min_steps:
             snap["unmet"].append(f"steps<{min_steps}")
 
@@ -324,6 +348,7 @@ class BaseRepoQAAgent(DefaultAgent):
             f"viewed={snap.get('viewed_files', 0)}/{snap.get('min_viewed', 0)}",
             f"ev_total={snap.get('collected_evidence', 0)}/{snap.get('min_total_evidence', 0)}",
             f"ev_assistant={snap.get('assistant_evidence', 0)}/{snap.get('min_assistant_evidence', 0)}",
+            f"answer_refs={snap.get('final_answer_refs', 0)}/{snap.get('min_final_answer_refs', 0)}",
         ]
         if "min_satisfied" in snap:
             lines.append(
@@ -502,13 +527,13 @@ class BaseRepoQAAgent(DefaultAgent):
             if match:
                 answer = match.group(1).strip()
                 answer = re.sub(r"```bash.*?```", "", answer, flags=re.DOTALL).strip()
-                if len(answer) > 20:
+                if len(answer) > 20 and len(self._extract_evidence_refs(answer)) > 0:
                     return self._format_final_answer(answer)
 
             if "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" in content and len(content) > 100:
                 answer = re.sub(r"```bash.*?```", "", content, flags=re.DOTALL).strip()
                 answer = re.sub(r"^(THOUGHT|Thought|REASONING):\s*", "", answer, flags=re.IGNORECASE).strip()
-                if len(answer) > 20:
+                if len(answer) > 20 and len(self._extract_evidence_refs(answer)) > 0:
                     return self._format_final_answer(answer)
 
         logger.warning("⚠️  No substantive answer found in Assistant messages; fallback to history synthesis.")

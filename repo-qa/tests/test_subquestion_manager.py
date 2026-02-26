@@ -174,3 +174,58 @@ def test_transition_signal_contains_subq_specific_hits():
     assert "symbol_hits=" in sig
     assert "required_hits=" in sig
     assert "hit_score=" in sig
+
+
+def test_subquestion_not_satisfied_by_single_weak_hit():
+    manager = SubQuestionManager()
+    manager.initialize(
+        {
+            "sub_questions": [
+                {
+                    "id": "SQ1",
+                    "sub_question": "How does A call B?",
+                    "symbols": ["A", "B"],
+                    "required_evidence": ["definition location", "call path"],
+                    "status": "open",
+                    "progress": 0.0,
+                    "attempts": 0,
+                }
+            ]
+        }
+    )
+
+    manager.update(step=1, action="rg -n A a.py", observation="10:A", graph_hint="")
+
+    sq = manager.sub_questions[0]
+    assert sq["status"] != "satisfied"
+
+
+def test_subquestion_satisfied_with_multi_signal_evidence():
+    manager = SubQuestionManager()
+    manager.initialize(
+        {
+            "sub_questions": [
+                {
+                    "id": "SQ1",
+                    "sub_question": "How does parse_action call execute?",
+                    "symbols": ["parse_action", "execute_action"],
+                    "required_evidence": ["definition location", "call path"],
+                    "entry_candidates": ["agents/default.py::DefaultAgent.execute_action"],
+                    "status": "open",
+                    "progress": 0.0,
+                    "attempts": 0,
+                }
+            ]
+        }
+    )
+
+    manager.update(
+        step=1,
+        action='nl -ba agents/default.py | sed -n "100,180p"',
+        observation='agents/default.py:116 def parse_action(...)\nagents/default.py:131 return self.execute_action(...)',
+        graph_hint='[GRAPH HINT] parse_action -> execute_action',
+    )
+
+    sq = manager.sub_questions[0]
+    assert sq["status"] == "satisfied"
+    assert len(sq.get("evidence_found", [])) >= 2

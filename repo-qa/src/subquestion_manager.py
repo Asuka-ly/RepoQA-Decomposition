@@ -109,11 +109,13 @@ class SubQuestionManager:
             sq["progress"] = round(new_progress, 3)
             sq["attempts"] = int(sq.get("attempts", 0)) + 1
 
-            if len(evidence_found) >= 2:
+            targeted_hits = symbol_hits + required_hits + entry_hits
+
+            if len(evidence_found) >= 2 and new_progress >= 0.65 and targeted_hits >= 2:
                 sq["status"] = "satisfied"
-            elif new_progress >= 0.4 and len(evidence_found) >= 1:
+            elif len(evidence_found) >= 3 and new_progress >= 0.45 and targeted_hits >= 1:
                 sq["status"] = "satisfied"
-            elif new_progress >= 1.0:
+            elif new_progress >= 1.0 and len(evidence_found) >= 1 and targeted_hits >= 1:
                 sq["status"] = "satisfied"
             elif hit_score > 0:
                 sq["status"] = "in_progress"
