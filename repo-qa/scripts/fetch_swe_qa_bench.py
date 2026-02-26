@@ -1,4 +1,4 @@
-"""下载并准备 SWE-QA-Bench 数据（保留 Question-Repo-Commit 绑定）。"""
+"""下载并准备 SWE-QA-Bench 数据（严格保留 Question-Repo-Commit 绑定）。"""
 from __future__ import annotations
 
 import argparse
@@ -14,15 +14,18 @@ DEFAULT_EXT_DIR = Path("data/external/SWE-QA-Bench")
 DEFAULT_OUT_DIR = Path("data/questions/swe_qa_bench")
 QUESTION_KEYS = (
     "question",
+    "question_text",
+    "question_body",
     "prompt",
     "query",
+    "problem_statement",
     "instruction",
     "problem",
     "task",
     "user_query",
 )
-REPO_KEYS = ("repo", "repo_name", "repository")
-COMMIT_KEYS = ("commit", "base_commit", "commit_hash", "revision")
+REPO_KEYS = ("repo", "repo_name", "repository", "repo_path", "repo_full_name")
+COMMIT_KEYS = ("commit", "base_commit", "commit_hash", "revision", "sha")
 INSTANCE_KEYS = ("instance_id", "id", "qid")
 
 
@@ -46,9 +49,17 @@ def _candidate_files(repo_dir: Path) -> List[Path]:
             continue
         if any(x in p.parts for x in {".git", "node_modules", "venv", "__pycache__"}):
             continue
-        if p.suffix.lower() in {".json", ".jsonl", ".csv", ".yaml", ".yml", ".md"}:
+        if p.suffix.lower() in {".json", ".jsonl", ".csv", ".yaml", ".yml"}:
             files.append(p)
-    return files
+    preferred = []
+    others = []
+    for fp in files:
+        name = fp.name.lower()
+        if any(k in name for k in ("swe", "bench", "question", "qa", "dataset", "instance")):
+            preferred.append(fp)
+        else:
+            others.append(fp)
+    return preferred + others
 
 
 def _is_question_like(text: str) -> bool:
@@ -68,8 +79,28 @@ def _pick_first_str(record: Dict[str, Any], keys: Iterable[str]) -> str | None:
     return None
 
 
+def _pick_nested_first_str(record: Dict[str, Any], keys: Iterable[str], max_nodes: int = 200) -> str | None:
+    direct = _pick_first_str(record, keys)
+    if direct:
+        return direct
+
+    stack: List[Any] = [record]
+    seen = 0
+    while stack and seen < max_nodes:
+        cur = stack.pop()
+        seen += 1
+        if isinstance(cur, dict):
+            nested = _pick_first_str(cur, keys)
+            if nested:
+                return nested
+            stack.extend(cur.values())
+        elif isinstance(cur, list):
+            stack.extend(cur[:30])
+    return None
+
+
 def _extract_question_text(record: Dict[str, Any]) -> str | None:
-    direct = _pick_first_str(record, QUESTION_KEYS)
+    direct = _pick_nested_first_str(record, QUESTION_KEYS)
     if direct:
         return direct
 
@@ -90,9 +121,9 @@ def _extract_question_text(record: Dict[str, Any]) -> str | None:
 
 def _extract_binding_metadata(record: Dict[str, Any]) -> Dict[str, Any]:
     metadata = {
-        "repo": _pick_first_str(record, REPO_KEYS),
-        "commit": _pick_first_str(record, COMMIT_KEYS),
-        "instance_id": _pick_first_str(record, INSTANCE_KEYS),
+        "repo": _pick_nested_first_str(record, REPO_KEYS),
+        "commit": _pick_nested_first_str(record, COMMIT_KEYS),
+        "instance_id": _pick_nested_first_str(record, INSTANCE_KEYS),
     }
     return metadata
 
@@ -159,14 +190,6 @@ def _iter_yaml_like_records(path: Path) -> Iterable[Dict[str, Any]]:
             yield {"question": clean, "_line": i}
 
 
-def _iter_markdown_questions(path: Path) -> Iterable[Dict[str, Any]]:
-    text = path.read_text(encoding="utf-8", errors="ignore")
-    for i, line in enumerate(text.splitlines(), 1):
-        clean = line.strip(" -\t#>*")
-        if _is_question_like(clean):
-            yield {"question": clean, "_line": i}
-
-
 def collect_questions(repo_dir: Path, max_questions: int = 200) -> List[Dict[str, Any]]:
     results: List[Dict[str, Any]] = []
     seen = set()
@@ -183,7 +206,7 @@ def collect_questions(repo_dir: Path, max_questions: int = 200) -> List[Dict[str
         elif suffix in {".yaml", ".yml"}:
             iterator = _iter_yaml_like_records(fp)
         else:
-            iterator = _iter_markdown_questions(fp)
+            continue
 
         for idx, rec in enumerate(iterator, 1):
             q = _extract_question_text(rec)
@@ -195,6 +218,9 @@ def collect_questions(repo_dir: Path, max_questions: int = 200) -> List[Dict[str
             seen.add(q_norm)
 
             binding = _extract_binding_metadata(rec)
+            if not binding.get("repo") or not binding.get("commit"):
+                continue
+
             results.append(
                 {
                     "source_file": str(fp.relative_to(repo_dir)),
@@ -257,13 +283,12 @@ def main() -> int:
 
     questions = collect_questions(target_dir, max_questions=args.max_questions)
     if not questions:
-        print("⚠️ No question-like records found. Please inspect dataset schema manually.")
+        print("⚠️ No valid Question-Repo-Commit records found. Please inspect dataset schema manually.")
         return 1
 
     index_path = materialize_questions(questions, output_dir)
-    with_binding = sum(1 for q in questions if q.get("repo"))
     print(f"✅ Extracted questions: {len(questions)}")
-    print(f"✅ Questions with repo binding: {with_binding}")
+    print(f"✅ Questions with repo binding: {len(questions)}")
     print(f"✅ Question files dir: {output_dir}")
     print(f"✅ Index: {index_path}")
     return 0

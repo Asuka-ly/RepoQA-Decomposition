@@ -1,6 +1,4 @@
-# Stage1 在线测试手册（精简版）
-
-> 只保留“可执行步骤 + 排障入口”。
+# Stage1 在线测试 Playbook（操作+排障）
 
 ## 1) 环境准备
 ```bash
@@ -9,58 +7,46 @@ bash setup.sh --yes
 pip install -r requirements.txt
 ```
 
-配置 `.env`：
-- `OPENAI_API_KEY`
-- `OPENAI_API_BASE`（若使用代理网关）
-
----
-
-## 2) SWE-QA 前置
+`.env` 至少配置：
 ```bash
+OPENAI_API_KEY=sk-xxxx
+OPENAI_API_BASE=https://api.openai.com/v1
+```
+
+## 2) 运行命令（统一 question-source 语义）
+```bash
+# 生成 SWE-QA 绑定题目
 python scripts/fetch_swe_qa_bench.py --max-questions 200
-```
-输出：`data/questions/swe_qa_bench/index.jsonl`（包含 repo/commit 绑定）。
 
----
-
-## 3) 运行命令
-
-### 3.1 单题
-```bash
+# 单题（SWE-QA）
 python scripts/run_single.py --config baseline --question-file swe_qa_bench/swe_qa_0001.txt
-```
 
-### 3.2 批量
-```bash
+# 批量（SWE-QA 主路径）
 python scripts/run_batch.py --mode single --question-source swe_qa --all-questions
-python scripts/run_batch.py --mode both --question-source auto --all-questions
-python scripts/run_batch.py --mode ablation --question-source stage1 --all-questions
-```
+python scripts/run_batch.py --mode both --question-source swe_qa --all-questions
 
-### 3.3 离线验证
-```bash
+# 回退（stage1）
+python scripts/run_batch.py --mode single --question-source stage1 --all-questions
+
+# 离线兜底
+python scripts/run_batch.py --mode both --question-source auto --all-questions --offline
 python scripts/run_offline_smoke.py
 ```
 
----
-
-## 4) 核心检查点
-- 运行日志中应出现题目绑定信息（repo/commit 或 binding mode）。
-- strategic 轨迹应含 `tool_calls`、`subquestion_trace`。
-- 最终 answer 应出现 `file.py:line` 证据引用。
-
----
-
-## 5) 失败排查（按顺序）
-1. **环境问题**：先看 `.env` 与 API 可用性。
-2. **绑定问题**：检查 `index.jsonl` 是否包含当前题目的 repo/commit。
-3. **执行问题**：看 batch 报告中的 `stderr_tail`。
-4. **证据不足问题**：用 `python scripts/analyze_trajectory.py --config baseline` 查看证据与提交门槛指标。
-
----
-
-## 6) 最小回归命令
+## 3) 最小验证清单
 ```bash
 pytest -q tests/test_run_batch.py tests/test_run_single_binding.py tests/test_run_offline_smoke.py
-pytest -q
+python scripts/run_offline_smoke.py
 ```
+
+## 4) 失败后第一时间看哪里（固定模板）
+1. **题目绑定是否存在**：检查 `data/questions/swe_qa_bench/index.jsonl` 是否有 `repo/commit/instance_id`。
+2. **批量参数是否正确**：确认 `run_batch` 使用了正确的 `--question-source`。
+3. **仓库准备是否失败**：查看 `run_single/run_batch` 日志中的 clone/checkout 报错。
+4. **API/网络问题**：若在线失败，先加 `--offline` 验证非网络链路。
+5. **结果定位**：查看 `experiments/comparison_reports/batch_run_*.json` 的 `stderr_tail`。
+
+## 5) 常见故障速查
+- `OPENAI_API_KEY` 未生效：重新确认 `.env` 或环境变量。
+- 代理引发请求异常：默认会清理代理；必须代理时显式 `--keep-proxy`。
+- 题目跑完但证据不足：使用 `python scripts/analyze_trajectory.py --config baseline` 检查质量标记。
