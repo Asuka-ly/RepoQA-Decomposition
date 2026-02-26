@@ -1,96 +1,86 @@
-# Stage1 v2.0 交接文档（面向协作开发与实验复现）
+# Stage1 v2 交接文档（主文档）
 
-## 0. 环境与测试（补全）
+> 目标：给下一位协作者最短路径理解“架构、逻辑流、方法、任务状态与下一步”。
 
-> 你提到的缺口（依赖下载/API 配置/测试命令）已补齐到独立操作手册：`docs/stage1_online_test_playbook.md`。
+## A. 架构总览（Architecture）
 
-快速入口：
+### A1. 分层
+- **执行层**：`src/agents/strategic_agent.py`、`src/agents/base.py`
+- **工具层**：`src/decomposition_action.py`、`src/graph_tools.py`、`src/tool_registry.py`
+- **状态层**：`src/subquestion_manager.py`
+- **图分析层**：`src/graph.py`
+- **运行层**：`scripts/run_single.py`、`scripts/run_batch.py`、`scripts/run_offline_smoke.py`
 
+### A2. 核心机制
+- `DECOMPOSE_WITH_GRAPH`：生成结构化 sub-questions。
+- `GRAPH_RETRIEVE` / `GRAPH_VALIDATE`：候选路径收敛与证据覆盖校验。
+- Submit gate：控制“何时允许提交”，避免空答/早答。
+
+---
+
+## B. 逻辑流（Logic Flow）
+1. **题目输入**：从 `data/questions/...` 读取。
+2. **题目绑定仓库解析**：若问题来自 SWE-QA 索引，则读取 `repo/commit`。
+3. **仓库定位**：`run_single.py` 动态 clone+checkout 到绑定版本（可用 `--repo-path` 覆盖）。
+4. **Agent 循环**：分解 -> 图检索/验证 -> 定向读取 -> 子问题更新。
+5. **提交判定**：submit gate 通过才结束。
+6. **轨迹输出**：保存统计、subq trace、tool calls。
+
+---
+
+## C. 使用方法（Methods）
+
+### C1. 数据准备
 ```bash
-cd repo-qa
-bash setup.sh --yes
-pip install -r requirements.txt
-# 配置 .env: OPENAI_API_KEY / OPENAI_API_BASE
 python scripts/fetch_swe_qa_bench.py --max-questions 200
-python scripts/run_batch.py --mode single --question-source swe_qa --all-questions
 ```
 
-
-## 1. 给协作者（如 pwh）的快速入口
-
-### 代码入口
-- Agent 主流程：`src/agents/strategic_agent.py`
-- 分解 Action：`src/decomposition_action.py`
-- 分解器：`src/decomposer.py`
-- 子问题状态：`src/subquestion_manager.py`
-- 提交门槛：`src/agents/base.py`
-- 轨迹分析：`scripts/analyze_trajectory.py`
-
-### 核心新增（v2.x）
-- 独立分解 Action `DECOMPOSE_WITH_GRAPH`。
-- 分解质量分 `decomposition_quality`。
-- 轨迹新增 `decomposition_action` 字段。
-- P0/P1：新增 `ToolRegistry` 与 `tool_calls`（trajectory schema v2 最小版）。
-
-## 2. 如何跑实验（最小命令）
-
+### C2. 单题
 ```bash
-# 单题（baseline）
-python scripts/run_single.py --question-file q2_config_loading.txt
-
-# 消融（baseline vs vanilla）
-python scripts/run_ablation.py --question-file q4_message_history_flow.txt
-
-# 轨迹分析
-python scripts/analyze_trajectory.py --config baseline
-python scripts/analyze_trajectory.py --config vanilla
+python scripts/run_single.py --config baseline --question-file swe_qa_bench/swe_qa_0001.txt
 ```
 
-## 3. 关键输出解释
+### C3. 批量
+```bash
+python scripts/run_batch.py --mode single --question-source swe_qa --all-questions
+python scripts/run_batch.py --mode both --question-source auto --all-questions
+python scripts/run_batch.py --mode ablation --question-source stage1 --all-questions
+```
 
-- `statistics.decomposition_quality`：分解先验质量（0~1）。
-- `decomposition_action.decomposition.action_metadata.contract_version`：分解契约版本（当前 stage1_v2.2）。
-- `decomposition_action.quality`：质量明细（prior + posterior 占位）。
-- `decomposition_action.decomposition.plan_order`：子问题执行顺序。
-- `decomposition_action.decomposition.evidence_requirements`：每个子问题证据要求。
-- `decomposition_action.decomposition.replan_triggers`：建议重规划触发器。
-- `subquestion_trace`：在线状态更新和重规划事件。
-- `tool_calls`：统一工具调用明细（name/reason/success/latency）。
-- `statistics.graph_tool_calls`：图工具调用次数（用于评估图融合深度）。
-- `quality_flags.missing_evidence_refs`：答案与轨迹证据都不足时为 true。
+### C4. 离线冒烟
+```bash
+python scripts/run_offline_smoke.py
+```
 
-## 4. 协作分工建议
+---
 
-- A（算法/规划）：优化 decomposition quality 与 replan 策略。
-- B（系统/工具）：图工具化（检索/验证接口）与 runner 稳定性。
-- C（评测/数据）：构造问题集，维护 ablation 报告模板与轨迹对齐检查。
+## D. 任务书（Question / Target / To Do / Done）
 
-## 5. 当前风险与排查
+### D1. Question（我们要解决什么）
+- 如何在 Repo-QA 中稳定做到：
+  1) 问题与目标仓库版本严格绑定；
+  2) 分解与检索可观测、可复盘；
+  3) 最终回答具备可追溯证据。
 
-1. 分解质量高但执行差：检查 entry_candidates 是否过泛。
-2. 长答案无证据：检查 submit gate 是否命中 evidence 检查。
-3. subq 满足率虚高：检查 evidence 是否被错误共享（targeted 逻辑）。
+### D2. Target（本阶段目标）
+- Stage1 交付“可运行、可批跑、可审计、可交接”的基线系统。
 
-## 6. 建议的交接检查清单
+### D3. Done（已完成）
+- 工具化分解/图检索/图验证接入。
+- submit gate + 命令过滤 + 宽扫描补偿机制落地。
+- SWE-QA 问题绑定仓库（repo/commit）链路贯通。
+- 单题/批量/离线 runner 与核心测试覆盖。
 
-- [ ] baseline/vanilla 各跑 1 次并保存轨迹
-- [ ] analyzer 能正确输出 evidence_ref_count
-- [ ] trajectory 中存在 decomposition_action 字段
-- [ ] 至少一个问题触发有效 sub-question 更新
+### D4. To Do（下一步）
+- 增强 clone/fetch 失败自动重试与错误聚合。
+- 增加 repo cache 生命周期管理（清理策略、上限控制）。
+- 补充线上批跑观测面板（失败类型分桶、仓库绑定覆盖率）。
 
+---
 
-## 7. 当前版本自我评审结论（2026-02）
-
-### 已确认修复
-- Question-Repo 解耦问题已修复：`fetch_swe_qa_bench.py` 保留 `repo/commit/instance_id`，`run_single.py` 根据题目索引动态切仓并 checkout 绑定 commit。
-- `run_batch.py` 已支持 `--question-source swe_qa|stage1|auto`，默认对齐 SWE-QA 使用场景。
-- 离线冒烟脚本在当前 submit gate 约束下已更新并验证 strategic/vanilla 均可完成提交。
-
-### 仍需持续观察
-- 大规模批跑时的仓库缓存大小增长（`data/external/repo_cache`）。
-- 远程 clone/fetch 异常时的自动重试和错误聚合（当前已可报错，但仍建议补重试策略）。
-
-### 交接优先事项（建议）
-1. 先跑 `fetch_swe_qa_bench.py`，确认 index 里 repo/commit 覆盖率。
-2. 再跑 `run_batch.py --question-source swe_qa`，确保轨迹 target repo 与题目绑定一致。
-3. 周期性清理/复用 repo cache，避免磁盘膨胀影响批次稳定性。
+## E. 最小验收清单
+- [ ] `fetch_swe_qa_bench.py` 成功生成索引。
+- [ ] `run_single.py` 在 SWE-QA 题目上使用绑定 repo/commit。
+- [ ] `run_batch.py --question-source swe_qa` 可执行。
+- [ ] `run_offline_smoke.py` strategic/vanilla 均完成提交。
+- [ ] `pytest -q` 通过。
