@@ -626,6 +626,12 @@ class BaseRepoQAAgent(DefaultAgent):
             except Exception:
                 pass
 
+        if hasattr(self, "decision_trace") and getattr(self, "decision_trace", None) is not None:
+            try:
+                data["decision_trace"] = self.decision_trace.to_dict()
+            except Exception:
+                pass
+
         with open(output_path / filename, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
 
