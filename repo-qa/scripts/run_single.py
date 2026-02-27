@@ -6,7 +6,6 @@ import json
 import os
 import subprocess
 import sys
-import argparse
 from pathlib import Path
 
 import litellm
@@ -48,6 +47,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--repo-path", default=None, help="Override target repository path")
     parser.add_argument("--offline", action="store_true", help="Use deterministic offline model")
     parser.add_argument("--repo-cache-dir", default=None, help="Local cache dir for benchmark repositories")
+    parser.add_argument("--report-file", default=None, help="Write unified JSON report to this path")
     return parser.parse_args()
 
 
@@ -162,6 +162,23 @@ def _resolve_target_repo(args: argparse.Namespace, task_file: Path, metadata: di
     return PATH_CONFIG.get_test_repo_path(), {"mode": "default", "repo": None, "commit": None}
 
 
+
+
+def _build_unified_report(agent, repo_meta: dict, question_file: str) -> dict:
+    stats = agent._get_stats() if hasattr(agent, "_get_stats") else {}
+    return {
+        "schema_version": "stage1_report.v1",
+        "question_file": question_file,
+        "repo_binding": repo_meta,
+        "telemetry": stats.get("telemetry", {}),
+        "tool_calls": stats.get("tool_call_counters", {}),
+        "decompose_calls": stats.get("decompose_tool_calls", 0),
+        "replan_events": stats.get("telemetry", {}).get("replan_events", stats.get("replan_events", 0)),
+        "evidence_coverage": stats.get("telemetry", {}).get("evidence_coverage", 0.0),
+        "completion_rate": stats.get("telemetry", {}).get("completion_rate", 0.0),
+        "decision_trace": getattr(getattr(agent, "decision_trace", None), "to_dict", lambda: {})(),
+    }
+
 def main():
     args = parse_args()
     _configure_network(keep_proxy=args.keep_proxy)
@@ -233,6 +250,12 @@ def main():
         result = agent.run(task, repo_path)
         status = result[0] if isinstance(result, (list, tuple)) else "Completed"
         print(f"\n✓ Final Status: {status}")
+
+        report = _build_unified_report(agent, repo_meta, str(task_file))
+        report_path = Path(args.report_file) if args.report_file else (PATH_CONFIG.repo_qa_root / "experiments" / "comparison_reports" / "single_report.json")
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"🧾 Unified report: {report_path}")
     except KeyboardInterrupt:
         print("\n⚠️  Interrupted by user")
     except Exception as e:

@@ -4,30 +4,15 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import re
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any
+
+from src.contracts import InvalidSWEQARecord, SWEQAAdapter
 
 SWE_QA_BENCH_GIT = "https://github.com/peng-weihan/SWE-QA-Bench.git"
 DEFAULT_EXT_DIR = Path("data/external/SWE-QA-Bench")
 DEFAULT_OUT_DIR = Path("data/questions/swe_qa_bench")
-QUESTION_KEYS = (
-    "question",
-    "question_text",
-    "question_body",
-    "prompt",
-    "query",
-    "problem_statement",
-    "instruction",
-    "problem",
-    "task",
-    "user_query",
-)
-REPO_KEYS = ("repo", "repo_name", "repository", "repo_path", "repo_full_name")
-COMMIT_KEYS = ("commit", "base_commit", "commit_hash", "revision", "sha")
-INSTANCE_KEYS = ("instance_id", "id", "qid")
-
 
 def run_git_clone(url: str, target_dir: Path, refresh: bool = False) -> None:
     if target_dir.exists() and refresh:
@@ -42,8 +27,8 @@ def run_git_clone(url: str, target_dir: Path, refresh: bool = False) -> None:
     subprocess.run(["git", "clone", "--depth", "1", url, str(target_dir)], check=True)
 
 
-def _candidate_files(repo_dir: Path) -> List[Path]:
-    files: List[Path] = []
+def _candidate_files(repo_dir: Path) -> list[Path]:
+    files: list[Path] = []
     for p in repo_dir.rglob("*"):
         if not p.is_file():
             continue
@@ -62,6 +47,8 @@ def _candidate_files(repo_dir: Path) -> List[Path]:
     return preferred + others
 
 
+
+
 def _is_question_like(text: str) -> bool:
     t = (text or "").strip()
     if len(t) < 12 or len(t) > 1200:
@@ -71,64 +58,7 @@ def _is_question_like(text: str) -> bool:
     return t.endswith("?") or t.lower().startswith(("what ", "why ", "how ", "where ", "which "))
 
 
-def _pick_first_str(record: Dict[str, Any], keys: Iterable[str]) -> str | None:
-    for key in keys:
-        val = record.get(key)
-        if isinstance(val, str) and val.strip():
-            return val.strip()
-    return None
-
-
-def _pick_nested_first_str(record: Dict[str, Any], keys: Iterable[str], max_nodes: int = 200) -> str | None:
-    direct = _pick_first_str(record, keys)
-    if direct:
-        return direct
-
-    stack: List[Any] = [record]
-    seen = 0
-    while stack and seen < max_nodes:
-        cur = stack.pop()
-        seen += 1
-        if isinstance(cur, dict):
-            nested = _pick_first_str(cur, keys)
-            if nested:
-                return nested
-            stack.extend(cur.values())
-        elif isinstance(cur, list):
-            stack.extend(cur[:30])
-    return None
-
-
-def _extract_question_text(record: Dict[str, Any]) -> str | None:
-    direct = _pick_nested_first_str(record, QUESTION_KEYS)
-    if direct:
-        return direct
-
-    stack: List[Any] = list(record.values())
-    while stack:
-        cur = stack.pop()
-        if isinstance(cur, str) and _is_question_like(cur):
-            return cur.strip()
-        if isinstance(cur, dict):
-            nested = _pick_first_str(cur, QUESTION_KEYS)
-            if nested:
-                return nested
-            stack.extend(cur.values())
-        elif isinstance(cur, list):
-            stack.extend(cur[:20])
-    return None
-
-
-def _extract_binding_metadata(record: Dict[str, Any]) -> Dict[str, Any]:
-    metadata = {
-        "repo": _pick_nested_first_str(record, REPO_KEYS),
-        "commit": _pick_nested_first_str(record, COMMIT_KEYS),
-        "instance_id": _pick_nested_first_str(record, INSTANCE_KEYS),
-    }
-    return metadata
-
-
-def _iter_json_records(path: Path) -> Iterable[Dict[str, Any]]:
+def _iter_json_records(path: Path):
     if path.suffix.lower() == ".jsonl":
         with path.open(encoding="utf-8", errors="ignore") as f:
             for line in f:
@@ -163,14 +93,14 @@ def _iter_json_records(path: Path) -> Iterable[Dict[str, Any]]:
                 yield x
 
 
-def _iter_csv_records(path: Path) -> Iterable[Dict[str, Any]]:
+def _iter_csv_records(path: Path):
     with path.open(encoding="utf-8", errors="ignore") as f:
         reader = csv.DictReader(f)
         for row in reader:
             yield dict(row)
 
 
-def _iter_yaml_like_records(path: Path) -> Iterable[Dict[str, Any]]:
+def _iter_yaml_like_records(path: Path):
     text = path.read_text(encoding="utf-8", errors="ignore")
     try:
         data = json.loads(text)
@@ -190,9 +120,11 @@ def _iter_yaml_like_records(path: Path) -> Iterable[Dict[str, Any]]:
             yield {"question": clean, "_line": i}
 
 
-def collect_questions(repo_dir: Path, max_questions: int = 200) -> List[Dict[str, Any]]:
-    results: List[Dict[str, Any]] = []
+def collect_questions(repo_dir: Path, max_questions: int = 200) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    results: list[dict[str, Any]] = []
     seen = set()
+    invalid_reason_counts: dict[str, int] = {}
+    adapter = SWEQAAdapter()
 
     for fp in _candidate_files(repo_dir):
         if len(results) >= max_questions:
@@ -209,35 +141,32 @@ def collect_questions(repo_dir: Path, max_questions: int = 200) -> List[Dict[str
             continue
 
         for idx, rec in enumerate(iterator, 1):
-            q = _extract_question_text(rec)
-            if not q:
+            adapted = adapter.adapt(rec)
+            if isinstance(adapted, InvalidSWEQARecord):
+                invalid_reason_counts[adapted.reason_code] = invalid_reason_counts.get(adapted.reason_code, 0) + 1
                 continue
-            q_norm = re.sub(r"\s+", " ", q).strip()
-            if q_norm in seen:
-                continue
-            seen.add(q_norm)
 
-            binding = _extract_binding_metadata(rec)
-            if not binding.get("repo") or not binding.get("commit"):
+            if adapted.question in seen:
                 continue
+            seen.add(adapted.question)
 
             results.append(
                 {
                     "source_file": str(fp.relative_to(repo_dir)),
                     "source_index": idx,
-                    "question": q_norm,
-                    "repo": binding.get("repo"),
-                    "commit": binding.get("commit"),
-                    "instance_id": binding.get("instance_id"),
+                    "question": adapted.question,
+                    "repo": adapted.repo,
+                    "commit": adapted.commit,
+                    "instance_id": adapted.instance_id,
                 }
             )
             if len(results) >= max_questions:
                 break
 
-    return results
+    return results, invalid_reason_counts
 
 
-def materialize_questions(questions: List[Dict[str, Any]], output_dir: Path) -> Path:
+def materialize_questions(questions: list[dict[str, Any]], output_dir: Path) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     index_path = output_dir / "index.jsonl"
     with index_path.open("w", encoding="utf-8") as idxf:
@@ -281,7 +210,7 @@ def main() -> int:
     if not target_dir.exists():
         raise FileNotFoundError(f"Target dir not found: {target_dir}")
 
-    questions = collect_questions(target_dir, max_questions=args.max_questions)
+    questions, invalid_reason_counts = collect_questions(target_dir, max_questions=args.max_questions)
     if not questions:
         print("⚠️ No valid Question-Repo-Commit records found. Please inspect dataset schema manually.")
         return 1
@@ -289,6 +218,7 @@ def main() -> int:
     index_path = materialize_questions(questions, output_dir)
     print(f"✅ Extracted questions: {len(questions)}")
     print(f"✅ Questions with repo binding: {len(questions)}")
+    print(f"✅ Invalid sample reason codes: {invalid_reason_counts}")
     print(f"✅ Question files dir: {output_dir}")
     print(f"✅ Index: {index_path}")
     return 0

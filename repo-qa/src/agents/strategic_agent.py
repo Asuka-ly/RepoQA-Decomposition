@@ -12,11 +12,11 @@ import json
 import re
 
 from src.agents.base import BaseRepoQAAgent
-from src.decomposer import StrategicDecomposer
-from src.decomposition_action import DecompositionAction
 from src.graph import CodeGraph
 from src.graph_tools import GraphTools
 from src.injectors import GraphInjector
+from src.planning import DecompositionPlanningTool
+from src.runtime.reporting import DecisionTraceExporter, UnifiedTelemetry
 from src.subquestion_manager import SubQuestionManager
 from src.tool_registry import ToolRegistry
 from src.utils import build_task_prompt, setup_logger
@@ -50,6 +50,10 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
         self.root_task = ""
         self.unresolved_symbol_cooldown = {}
         self._pending_replan_suggestion = ""
+        self._last_unresolved_symbols_count = 0
+        self.telemetry = UnifiedTelemetry()
+        self.decision_trace = DecisionTraceExporter()
+        self.planning_tool = None
 
     def _format_tool_result(self, tool: str, payload: dict, detail: dict | None = None) -> str:
         """统一工具结果展示：兼顾可读性与上下文完整性。"""
@@ -129,15 +133,16 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
         if self.decompose_tool_calls >= self.exp_config.max_decompose_calls:
             return False
 
-        self.graph_tools = GraphTools(self.code_graph)
-        self.decomposer = StrategicDecomposer(self.model, self.code_graph)
-        decompose_action = DecompositionAction(self.decomposer)
+        if self.planning_tool is None:
+            self.planning_tool = DecompositionPlanningTool(self.model, self.code_graph)
+        self.graph_tools = self.planning_tool.graph_tools
+        self.decomposer = self.planning_tool.decomposer
 
         action_result = self.tool_registry.invoke(
             step=step,
             tool_name="DECOMPOSE_WITH_GRAPH",
             reason=reason,
-            fn=lambda: decompose_action.execute(task),
+            fn=lambda: self.planning_tool.action.execute(task),
             input_obj={"task": task[:300]},
         )
 
@@ -147,6 +152,8 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
         self.decomposition_workflow_trace.extend(action_result.workflow_trace)
         self.subq_manager.initialize(decomposition)
         self.decompose_tool_calls += 1
+        self.telemetry.decompose_calls += 1
+        self.telemetry.tool_calls = sum(self.tool_registry.get_counters().values())
         return True
 
     def _handle_tool_call_command(self, command: str) -> dict:
@@ -226,6 +233,7 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
 
         # Graph tool wrapper is always available, but may be disabled by config.
         self.graph_tools = GraphTools(self.code_graph)
+        self.planning_tool = DecompositionPlanningTool(self.model, self.code_graph)
 
         # Optional start-time decomposition; can be disabled for tool-on-demand behavior.
         if self.exp_config.decompose_on_start:
@@ -432,9 +440,11 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
                         input_obj={"sub_question_count": len(open_subq[:3])},
                     )
                     self.graph_tool_calls += 1
+                    self.telemetry.tool_calls = sum(self.tool_registry.get_counters().values())
                     unresolved_symbols = [
                         sym for sym, items in (retrieve.get("results", {}) or {}).items() if not items
                     ]
+                    self._last_unresolved_symbols_count = len(unresolved_symbols)
                     if unresolved_symbols:
                         for sym in unresolved_symbols:
                             self.unresolved_symbol_cooldown[sym.lower()] = step + 3
@@ -444,6 +454,7 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
                         f"coverage={validate.get('grounding_coverage', 0.0)} "
                         f"exec={validate.get('executable_entry_rate', 0.0)}"
                     )
+                    self.telemetry.evidence_coverage = float(validate.get("grounding_coverage", 0.0))
                     if unresolved_symbols:
                         graph_hint += "\n[UNRESOLVED_SYMBOLS] " + ", ".join(unresolved_symbols)
                     action_hints = self._build_graph_action_hints(retrieve)
@@ -460,12 +471,22 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
             )
             manager_replan = self.subq_manager.check_replan_needed(step)
             relation_replan = self._relation_replan_needed()
-            if manager_replan or relation_replan:
+            tool_replan = None
+            if self.planning_tool and self.exp_config.enable_dynamic_redecompose:
+                tool_replan = self.planning_tool.should_replan(
+                    no_new_evidence_steps=self.subq_manager.no_new_evidence_steps,
+                    evidence_coverage=self.telemetry.evidence_coverage,
+                    unresolved_symbols=self._last_unresolved_symbols_count,
+                )
+            if manager_replan or relation_replan or (tool_replan.should_replan if tool_replan else False):
+                self.telemetry.replan_events += 1
                 reasons = []
                 if manager_replan and self.subq_manager.replan_events:
                     reasons.extend(self.subq_manager.replan_events[-1].get("reasons", []))
                 if relation_replan:
                     reasons.append("relation_metric_imbalance")
+                if tool_replan and tool_replan.should_replan:
+                    reasons.extend(tool_replan.reasons)
                 obs_dict["observation"] += (
                     "\n\n⚠️ [REPLAN SIGNAL] Quality indicates replanning is needed. "
                     f"Reasons={sorted(set(reasons))}."
@@ -476,11 +497,14 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
                 self._pending_replan_suggestion = f"TOOL_CALL DECOMPOSE_WITH_GRAPH {payload}"
                 obs_dict["observation"] += "\n[REPLAN ACTION] " + self._pending_replan_suggestion
                 obs_dict["output"] = obs_dict["observation"]
+                self._maybe_trigger_redecompose(task_hint, step, extra_reasons=sorted(set(reasons)))
 
             dashboard = self._build_sq_dashboard()
             obs_dict["observation"] += "\n" + dashboard
             obs_dict["output"] = obs_dict["observation"]
             logger.info("   " + dashboard)
+            reward_proxy = 0.1 if "grounded=" in graph_hint else 0.0
+            self.decision_trace.append(state=f"step_{step}", action=obs_dict.get("action", ""), reward_proxy=reward_proxy)
 
         return obs_dict
 
@@ -499,9 +523,15 @@ class StrategicRepoQAAgent(BaseRepoQAAgent):
             stats["sub_questions_satisfied"] = sum(
                 1 for sq in self.subq_manager.sub_questions if sq.get("status") == "satisfied"
             )
-            stats["replan_events"] = len(self.subq_manager.replan_events)
+            stats["replan_events"] = max(len(self.subq_manager.replan_events), self.telemetry.replan_events)
 
         if self.decomposition_quality:
             stats["decomposition_quality"] = self.decomposition_quality.get("overall", 0.0)
+
+        if self.subq_manager.sub_questions:
+            total = len(self.subq_manager.sub_questions)
+            satisfied = sum(1 for sq in self.subq_manager.sub_questions if sq.get("status") == "satisfied")
+            self.telemetry.completion_rate = round(satisfied / max(1, total), 4)
+        stats["telemetry"] = self.telemetry.to_dict()
 
         return stats
